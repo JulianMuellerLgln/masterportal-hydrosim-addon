@@ -1,0 +1,19 @@
+{
+  "name": "masterportal-hydrosim-addon",
+  "version": "0.1.0",
+  "description": "Real-time shallow water flood simulation addon for Masterportal 3 / Civitas Core — AssemblyScript WASM + Cesium",
+  "license": "EUPL-1.2",
+  "author": "Julian Müller",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:wasm": "npx asc assembly/index.ts --target release -o dist/hydrosim.wasm --runtime stub --initialMemory 4 --maximumMemory 256 --converge --optimize",
+    "build:js": "vite build",
+    "build": "npm run build:wasm && npm run build:js",
+    "dev": "vite build --watch"
+  },
+  "devDependencies": {
+    "assemblyscript": "^0.27.34",
+    "vite": "^5.4.0"
+  }
+}

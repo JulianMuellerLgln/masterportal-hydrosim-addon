@@ -1,0 +1,14 @@
+{
+  "targets": {
+    "release": {
+      "outFile": "dist/hydrosim.wasm",
+      "runtime": "stub",
+      "optimizeLevel": 3,
+      "shrinkLevel": 1,
+      "noAssert": true,
+      "exportRuntime": false,
+      "initialMemory": 4,
+      "maximumMemory": 256
+    }
+  }
+}
