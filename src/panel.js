@@ -107,21 +107,20 @@ const PANEL_CSS = `
 .hs-draw-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .hs-draw-btn.active { background: #2e7d32; border-color: #43a047; }
 
-.hs-event-btns { display: flex; gap: 5px; }
-.hs-event-btn {
-  flex: 1;
-  padding: 5px 4px;
-  font-size: 0.75rem;
-  border-radius: 5px;
-  border: 1px solid #37474f;
+.hs-mode-select {
+  width: 100%;
   background: #263238;
-  color: #cfd8dc;
-  cursor: pointer;
-  text-align: center;
-  transition: background 0.18s;
+  color: #e3f2fd;
+  border: 1px solid #37474f;
+  border-radius: 6px;
+  padding: 7px 8px;
+  font-size: 0.82rem;
 }
-.hs-event-btn.active { background: #1565c0; border-color: #1976d2; color: #fff; }
-.hs-event-btn:hover:not(.active) { background: #37474f; }
+.hs-mode-help {
+  font-size: 0.70rem;
+  color: #90a4ae;
+  margin-top: 4px;
+}
 
 .hs-label {
   font-size: 0.78rem;
@@ -211,18 +210,26 @@ input[type=range].hs-range {
   margin-right: 4px;
 }
 
-#hs-phase3-section {
+#hs-measures-section {
   margin-top: 4px;
   border-top: 1px solid #263238;
   padding-top: 10px;
-  opacity: 0.5;
 }
-.hs-phase3-notice {
-  font-size: 0.72rem;
+.hs-measure-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 5px 0;
+  font-size: 0.78rem;
+  color: #cfd8dc;
+}
+.hs-measure-row input[type=checkbox] {
+  accent-color: #42a5f5;
+}
+.hs-measure-help {
+  font-size: 0.70rem;
   color: #90a4ae;
-  font-style: italic;
-  text-align: center;
-  padding: 4px 0;
+  margin-top: 4px;
 }
 `;
 
@@ -248,19 +255,17 @@ const PANEL_HTML = `
     </div>
   </div>
 
-  <!-- Event type -->
+  <!-- Mode -->
   <div class="hs-section">
-    <div class="hs-section-title">Ereignistyp</div>
-    <div class="hs-event-btns">
-      <button class="hs-event-btn active" data-event="rain">
-        <i class="bi bi-cloud-rain"></i> Starkregen
-      </button>
-      <button class="hs-event-btn" data-event="flash">
-        <i class="bi bi-lightning"></i> Sturzflut
-      </button>
-      <button class="hs-event-btn" data-event="river">
-        <i class="bi bi-tsunami"></i> Fluss
-      </button>
+    <div class="hs-section-title">Modus</div>
+    <select id="hs-mode" class="hs-mode-select">
+      <option value="auto" selected>Automatik (empfohlen)</option>
+      <option value="rain">Starkregen</option>
+      <option value="flash">Sturzflut</option>
+      <option value="river">Fluss</option>
+    </select>
+    <div class="hs-mode-help" id="hs-mode-help">
+      Automatik wählt den Ereignistyp anhand von Volumen und Dauer.
     </div>
   </div>
 
@@ -329,13 +334,31 @@ const PANEL_HTML = `
     </table>
   </div>
 
-  <!-- Phase 3 stub -->
-  <div id="hs-phase3-section">
+  <!-- Measures -->
+  <div id="hs-measures-section">
     <div class="hs-section-title">
       <i class="bi bi-shield-check"></i> Schutzmaßnahmen
     </div>
-    <div class="hs-phase3-notice">
-      Verfügbar in Phase 3 — Pumpen, Deiche, Renaturierung
+    <label class="hs-measure-row">
+      <span><i class="bi bi-droplet-half"></i> Pumpen aktiv</span>
+      <input id="hs-measure-pump" type="checkbox">
+    </label>
+    <label class="hs-measure-row">
+      <span><i class="bi bi-bricks"></i> Mobile Deiche</span>
+      <input id="hs-measure-dike" type="checkbox">
+    </label>
+    <label class="hs-measure-row">
+      <span><i class="bi bi-tree"></i> Retentionsflächen</span>
+      <input id="hs-measure-retention" type="checkbox">
+    </label>
+    <div class="hs-label" style="margin-top:6px">
+      Maßnahmen-Intensität
+      <span><span id="hs-measure-level-val">40</span>%</span>
+    </div>
+    <input type="range" class="hs-range" id="hs-measure-level"
+           min="0" max="100" step="5" value="40">
+    <div class="hs-measure-help">
+      Wirkt auf Zuflussreduktion und Fließwiderstand in der Simulation.
     </div>
   </div>
 
@@ -383,9 +406,16 @@ export function createPanel() {
   const volSlider   = $('hs-volume');
   const durSlider   = $('hs-duration');
   const speedSlider = $('hs-speed');
+  const modeSelect  = $('hs-mode');
+  const modeHelp    = $('hs-mode-help');
   const volVal      = $('hs-vol-val');
   const durVal      = $('hs-dur-val');
   const speedVal    = $('hs-speed-val');
+  const measurePump = $('hs-measure-pump');
+  const measureDike = $('hs-measure-dike');
+  const measureRet  = $('hs-measure-retention');
+  const measureLvl  = $('hs-measure-level');
+  const measureLvlVal = $('hs-measure-level-val');
   const impactSec   = $('hs-impact-section');
   const impactCount = $('hs-impact-count');
   const impactTbody = $('hs-impact-tbody');
@@ -400,13 +430,11 @@ export function createPanel() {
     panel.classList.remove('visible');
   });
 
-  // Event type buttons
-  for (const btn of document.querySelectorAll('.hs-event-btn')) {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.hs-event-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-    });
-  }
+  modeSelect.addEventListener('change', () => {
+    modeHelp.textContent = modeSelect.value === 'auto'
+      ? 'Automatik wählt den Ereignistyp anhand von Volumen und Dauer.'
+      : `Manueller Modus: ${modeSelect.options[modeSelect.selectedIndex].text}`;
+  });
 
   // Sliders
   volSlider.addEventListener('input', () => {
@@ -418,6 +446,9 @@ export function createPanel() {
   speedSlider.addEventListener('input', () => {
     speedVal.textContent = speedSlider.value;
   });
+  measureLvl.addEventListener('input', () => {
+    measureLvlVal.textContent = measureLvl.value;
+  });
 
   // --- Public API returned to main.js ---
 
@@ -427,13 +458,18 @@ export function createPanel() {
 
     /** Get current parameter values from the panel. */
     getParams() {
-      const activeEvent = document.querySelector('.hs-event-btn.active');
       return {
         volumeM3:   Number(volSlider.value),
         durationMin: Number(durSlider.value),
         durationS:  Number(durSlider.value) * 60,
         speed:      Number(speedSlider.value),
-        eventType:  activeEvent?.dataset.event || 'rain'
+        mode:       modeSelect.value || 'auto',
+        measures: {
+          pump: !!measurePump.checked,
+          dike: !!measureDike.checked,
+          retention: !!measureRet.checked,
+          level: Number(measureLvl.value) / 100
+        }
       };
     },
 

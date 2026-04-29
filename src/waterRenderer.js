@@ -68,6 +68,7 @@ function buildWaterPrimitive(h, zb, nx, ny, dx, originLon, originLat) {
     for (let col = 0; col < nx - 1; col++) {
       const idx = row * nx + col;
       const depth = h[idx];
+      if (!Number.isFinite(depth)) continue;
       if (depth < MIN_DEPTH) continue;
 
       const lon0 = originLon + col * dLon;
@@ -77,6 +78,7 @@ function buildWaterPrimitive(h, zb, nx, ny, dx, originLon, originLat) {
 
       // Place surface above terrain mesh using WASM bed elevation + water depth.
       const elev = zb[idx] + depth + 0.05;
+      if (!Number.isFinite(elev)) continue;
 
       // Two triangles per quad (CCW winding, facing up)
       // Triangle 1: SW, SE, NE

@@ -114,6 +114,19 @@ export function computeImpact(scene, h, nx, ny, dx, originLon, originLat) {
   return results.slice(0, 20); // top 20
 }
 
+/** Count currently loaded Cesium3DTileset-like primitives in scene. */
+export function countLoadedTilesets(scene) {
+  if (!scene?.primitives) return 0;
+  let count = 0;
+  for (let i = 0; i < scene.primitives.length; i++) {
+    const prim = scene.primitives.get(i);
+    if (!prim || prim.imageBasedLighting === undefined) continue;
+    if (!prim.boundingSphere) continue;
+    count += 1;
+  }
+  return count;
+}
+
 /**
  * Summarise impact results as a human-readable stats object.
  */

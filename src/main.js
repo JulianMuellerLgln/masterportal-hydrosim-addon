@@ -1,7 +1,7 @@
 import { startPolygonDraw } from './cesiumDraw.js';
 import { sampleTerrainGrid } from './terrainSampler.js';
 import { createWaterRenderer } from './waterRenderer.js';
-import { computeImpact } from './lod2Impact.js';
+import { computeImpact, countLoadedTilesets } from './lod2Impact.js';
 import { createPanel } from './panel.js';
 
 (async function HydroSimMain() {
@@ -53,9 +53,10 @@ import { createPanel } from './panel.js';
   }
 
   try {
+    const wasmUrl = `/hydrosim.wasm?v=${Date.now()}`;
     let result;
     try {
-      result = await WebAssembly.instantiateStreaming(fetch('/hydrosim.wasm'), {
+      result = await WebAssembly.instantiateStreaming(fetch(wasmUrl, { cache: 'no-store' }), {
         env: {
           abort(msg, file, line, col) {
             ERR(`WASM abort at ${file}:${line}:${col}`, msg);
@@ -63,7 +64,7 @@ import { createPanel } from './panel.js';
         }
       });
     } catch (_streamErr) {
-      const resp = await fetch('/hydrosim.wasm');
+      const resp = await fetch(wasmUrl, { cache: 'no-store' });
       const bytes = await resp.arrayBuffer();
       result = await WebAssembly.instantiate(bytes, {
         env: {
@@ -150,6 +151,24 @@ import { createPanel } from './panel.js';
     return 50;
   }
 
+  function clamp01(v) {
+    return Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
+  }
+
+  function resolveEventMode(params) {
+    if (params.mode && params.mode !== 'auto') return params.mode;
+    const intensity = params.volumeM3 / Math.max(60, params.durationS);
+    if (intensity < 150) return 'rain';
+    if (intensity < 900) return 'flash';
+    return 'river';
+  }
+
+  function modeFactors(mode) {
+    if (mode === 'flash') return { inflow: 1.20, friction: 0.95 };
+    if (mode === 'river') return { inflow: 0.90, friction: 0.85 };
+    return { inflow: 1.00, friction: 1.00 };
+  }
+
   async function runTerrainSampling(scene) {
     setState('sampling');
     ui.setStatus('Terrain wird abgetastet…', 'bi-hourglass-split');
@@ -207,12 +226,14 @@ import { createPanel } from './panel.js';
 
   function buildImpactCacheKey() {
     const params = ui.getParams();
+    const mode = resolveEventMode(params);
+    const m = params.measures || {};
     const poly = (polygonCoords || [])
       .slice(0, 12)
       .map(p => `${p.lon.toFixed(5)}:${p.lat.toFixed(5)}`)
       .join('|');
     const grid = terrainInfo ? `${terrainInfo.nx}x${terrainInfo.ny}@${Math.round(terrainInfo.dx)}` : 'nogrid';
-    return `${grid}|v=${params.volumeM3}|d=${params.durationS}|e=${params.eventType}|p=${poly}`;
+    return `${grid}|v=${params.volumeM3}|d=${params.durationS}|m=${mode}|ml=${clamp01(m.level).toFixed(2)}|mp=${m.pump ? 1 : 0}|md=${m.dike ? 1 : 0}|mr=${m.retention ? 1 : 0}|p=${poly}`;
   }
 
   function computeImpactAsync(scene, h, nx, ny, dx, originLon, originLat) {
@@ -238,6 +259,7 @@ import { createPanel } from './panel.js';
       const h = new Float32Array(wasmMemory.buffer, wasmExports.hPtr(), nx * ny);
       const scene = getScene();
       const key = buildImpactCacheKey();
+      const loadedTilesets = scene ? countLoadedTilesets(scene) : 0;
       let impacts = impactCache.get(key);
       if (!impacts) {
         impacts = scene ? await computeImpactAsync(scene, h, nx, ny, dx, originLon, originLat) : [];
@@ -248,7 +270,11 @@ import { createPanel } from './panel.js';
         }
       }
       ui.setImpact(impacts);
-      ui.setStatus(`Fertig · ${impacts.length} Gebäude betroffen`, 'bi-check-circle');
+      if (loadedTilesets === 0) {
+        ui.setStatus('Fertig · keine LoD2-Gebäudelayer geladen (Impact = 0)', 'bi-info-circle');
+      } else {
+        ui.setStatus(`Fertig · ${impacts.length} Gebäude betroffen`, 'bi-check-circle');
+      }
     } catch (e) {
       ERR('Impact analysis failed:', e);
       ui.setStatus('Simulation beendet (Impact-Analyse fehlgeschlagen)', 'bi-exclamation-triangle');
@@ -260,11 +286,15 @@ import { createPanel } from './panel.js';
     if (!terrainInfo) return;
 
     const params = ui.getParams();
+    const mode = resolveEventMode(params);
+    const mf = modeFactors(mode);
+    const measures = params.measures || {};
+    const level = clamp01(measures.level);
     const { nx, ny, dx, originLon, originLat } = terrainInfo;
 
     // Guard against non-finite solver outputs to keep dt and UI stable.
     const rawMaxDepth = wasmExports.maxDepth();
-    const safeMaxDepth = Number.isFinite(rawMaxDepth) && rawMaxDepth > 0 ? rawMaxDepth : 0.01;
+    const safeMaxDepth = Number.isFinite(rawMaxDepth) && rawMaxDepth > 0 ? Math.min(rawMaxDepth, 10) : 0.01;
     const maxH = Math.max(0.01, safeMaxDepth);
     const dt = Math.min((dx / Math.sqrt(9.81 * maxH)) * 0.45, 4.0);
     const stepsPerFrame = Math.max(1, Math.round(params.speed));
@@ -275,15 +305,30 @@ import { createPanel } from './panel.js';
       src = computeSourceCenter(polygonCoords, nx, ny, dx, originLon, originLat);
       const sourceAreaCells = Math.max(1, Math.PI * src.radius * src.radius);
       const sourceAreaM2 = sourceAreaCells * dx * dx;
-      const fluxM3ps = params.volumeM3 / params.durationS;
-      depthPerStep = Math.max(0, (fluxM3ps / sourceAreaM2) * dt);
+      const fluxM3ps = params.volumeM3 / Math.max(1, params.durationS);
+      const measureReduction = Math.max(
+        0.20,
+        1
+          - (measures.pump ? 0.35 * level : 0)
+          - (measures.retention ? 0.25 * level : 0)
+          - (measures.dike ? 0.10 * level : 0)
+      );
+      const effectiveFlux = fluxM3ps * mf.inflow * measureReduction;
+      depthPerStep = Math.max(0, Math.min(0.01, (effectiveFlux / sourceAreaM2) * dt));
     }
+
+    const frictionBoost =
+      1
+      + (measures.dike ? 0.55 * level : 0)
+      + (measures.retention ? 0.35 * level : 0)
+      + (measures.pump ? 0.15 * level : 0);
+    const cf = Math.max(0.01, 0.025 * mf.friction * frictionBoost);
 
     for (let i = 0; i < stepsPerFrame; i++) {
       if (src) {
         wasmExports.injectSource(src.cx, src.cy, src.radius, depthPerStep);
       }
-      wasmExports.step(dt, 9.81, 0.025);
+      wasmExports.step(dt, 9.81, cf);
       simT += dt;
       if (simT >= params.durationS) break;
     }
@@ -304,7 +349,7 @@ import { createPanel } from './panel.js';
     }
 
     const maxDepthRaw = wasmExports.maxDepth();
-    const maxDepth = Number.isFinite(maxDepthRaw) && maxDepthRaw >= 0 ? maxDepthRaw : 0;
+    const maxDepth = Number.isFinite(maxDepthRaw) && maxDepthRaw >= 0 ? Math.min(maxDepthRaw, 99) : 0;
     ui.setProgress(Math.min(1, simT / params.durationS));
     ui.setStatus(`T = ${Math.round(simT)}s · max. Tiefe ${maxDepth.toFixed(2)} m`, 'bi-droplet-fill');
 
@@ -368,8 +413,10 @@ import { createPanel } from './panel.js';
       wasmExports.setTerrain(scratchOff, nx * ny);
     }
 
+    const mode = resolveEventMode(ui.getParams());
+    const modeLabel = mode === 'flash' ? 'Sturzflut' : mode === 'river' ? 'Fluss' : 'Starkregen';
     setState('running');
-    ui.setStatus('Simulation läuft…', 'bi-play-fill');
+    ui.setStatus(`Simulation läuft… (${modeLabel})`, 'bi-play-fill');
     cancelAnimationFrame(animFrameId);
     animFrameId = requestAnimationFrame(tickLoop);
   });

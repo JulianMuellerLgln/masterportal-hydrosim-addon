@@ -9,7 +9,7 @@
   "scripts": {
     "build:wasm": "npx asc assembly/index.ts -o dist/hydrosim.wasm --runtime stub --initialMemory 4 --maximumMemory 256 -O3 --converge",
     "build:js": "vite build",
-    "build": "npm run build:wasm && npm run build:js",
+    "build": "npm run build:js && npm run build:wasm",
     "dev": "vite build --watch"
   },
   "devDependencies": {

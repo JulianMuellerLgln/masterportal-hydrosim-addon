@@ -46,6 +46,8 @@ let ZB_OFF: i32 = 0;
 
 let SIM_T:     f32 = 0.0;  // elapsed simulation time in seconds
 let MAX_DEPTH: f32 = 0.0;  // peak depth seen this step (exposed to JS)
+const MAX_CELL_DEPTH: f32 = 20.0;
+const MAX_VEL: f32 = 25.0;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -226,7 +228,9 @@ export function step(dt: f32, g: f32, cf: f32): void {
       }
 
       let hn: f32 = h - dt * (dq_x + dq_y);
+      if (!isFinite(hn)) hn = 0.0;
       if (hn < 0.0) hn = 0.0;
+      if (hn > MAX_CELL_DEPTH) hn = MAX_CELL_DEPTH;
 
       // Momentum x:  d(hu)/dt = -d(hu²+gh²/2)/dx - g·h·dzb/dx - Cf·u·|U|
       const speed: f32 = Mathf.sqrt(u * u + v * v);
@@ -243,6 +247,9 @@ export function step(dt: f32, g: f32, cf: f32): void {
         dpu_dx = ((huE2 * uE + presE) - (huC * u + pres)) * invDx;
       }
       let un: f32 = u - dt * (dpu_dx / (h + 1e-6) + g * dzbdx + cf * u * speed);
+      if (!isFinite(un)) un = 0.0;
+      if (un > MAX_VEL) un = MAX_VEL;
+      if (un < -MAX_VEL) un = -MAX_VEL;
       // Dry cell: no velocity
       if (hn < 1e-4) un = 0.0;
 
@@ -261,6 +268,9 @@ export function step(dt: f32, g: f32, cf: f32): void {
         dpv_dy = ((hvN2 * vN + presN) - (hvC * v + pres)) * invDx;
       }
       let vn: f32 = v - dt * (dpv_dy / (h + 1e-6) + g * dzbdy + cf * v * speed);
+      if (!isFinite(vn)) vn = 0.0;
+      if (vn > MAX_VEL) vn = MAX_VEL;
+      if (vn < -MAX_VEL) vn = -MAX_VEL;
       if (hn < 1e-4) vn = 0.0;
 
       fset(HN_OFF, x, y, hn);
@@ -317,6 +327,9 @@ export function gridNx(): i32 { return NX; }
 
 /** Grid height (cells). */
 export function gridNy(): i32 { return NY; }
+
+/** Build/version marker for runtime verification. */
+export function apiVersion(): i32 { return 20260429; }
 
 /** Cell size in metres. */
 export function gridDx(): f32 { return DX; }
