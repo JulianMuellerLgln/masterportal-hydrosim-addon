@@ -98,6 +98,8 @@ import { createPanel } from './panel.js';
   let animFrameId = null;
   let simT = 0;
   let frameCounter = 0;
+  const impactCache = new Map();
+  const IMPACT_CACHE_MAX = 10;
   const MAX_INTERACTIVE_CAMERA_HEIGHT_M = 8000;
 
   function setState(next) {
@@ -203,7 +205,28 @@ import { createPanel } from './panel.js';
     };
   }
 
-  function finishSimulation() {
+  function buildImpactCacheKey() {
+    const params = ui.getParams();
+    const poly = (polygonCoords || [])
+      .slice(0, 12)
+      .map(p => `${p.lon.toFixed(5)}:${p.lat.toFixed(5)}`)
+      .join('|');
+    const grid = terrainInfo ? `${terrainInfo.nx}x${terrainInfo.ny}@${Math.round(terrainInfo.dx)}` : 'nogrid';
+    return `${grid}|v=${params.volumeM3}|d=${params.durationS}|e=${params.eventType}|p=${poly}`;
+  }
+
+  function computeImpactAsync(scene, h, nx, ny, dx, originLon, originLat) {
+    return new Promise(resolve => {
+      const run = () => resolve(computeImpact(scene, h, nx, ny, dx, originLon, originLat));
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(run, { timeout: 250 });
+      } else {
+        setTimeout(run, 0);
+      }
+    });
+  }
+
+  async function finishSimulation() {
     cancelAnimationFrame(animFrameId);
     animFrameId = null;
     setState('results');
@@ -214,7 +237,16 @@ import { createPanel } from './panel.js';
       const { nx, ny, dx, originLon, originLat } = terrainInfo;
       const h = new Float32Array(wasmMemory.buffer, wasmExports.hPtr(), nx * ny);
       const scene = getScene();
-      const impacts = scene ? computeImpact(scene, h, nx, ny, dx, originLon, originLat) : [];
+      const key = buildImpactCacheKey();
+      let impacts = impactCache.get(key);
+      if (!impacts) {
+        impacts = scene ? await computeImpactAsync(scene, h, nx, ny, dx, originLon, originLat) : [];
+        impactCache.set(key, impacts);
+        if (impactCache.size > IMPACT_CACHE_MAX) {
+          const oldest = impactCache.keys().next().value;
+          impactCache.delete(oldest);
+        }
+      }
       ui.setImpact(impacts);
       ui.setStatus(`Fertig · ${impacts.length} Gebäude betroffen`, 'bi-check-circle');
     } catch (e) {
@@ -230,7 +262,10 @@ import { createPanel } from './panel.js';
     const params = ui.getParams();
     const { nx, ny, dx, originLon, originLat } = terrainInfo;
 
-    const maxH = Math.max(0.01, wasmExports.maxDepth());
+    // Guard against non-finite solver outputs to keep dt and UI stable.
+    const rawMaxDepth = wasmExports.maxDepth();
+    const safeMaxDepth = Number.isFinite(rawMaxDepth) && rawMaxDepth > 0 ? rawMaxDepth : 0.01;
+    const maxH = Math.max(0.01, safeMaxDepth);
     const dt = Math.min((dx / Math.sqrt(9.81 * maxH)) * 0.45, 4.0);
     const stepsPerFrame = Math.max(1, Math.round(params.speed));
 
@@ -268,7 +303,8 @@ import { createPanel } from './panel.js';
       );
     }
 
-    const maxDepth = wasmExports.maxDepth();
+    const maxDepthRaw = wasmExports.maxDepth();
+    const maxDepth = Number.isFinite(maxDepthRaw) && maxDepthRaw >= 0 ? maxDepthRaw : 0;
     ui.setProgress(Math.min(1, simT / params.durationS));
     ui.setStatus(`T = ${Math.round(simT)}s · max. Tiefe ${maxDepth.toFixed(2)} m`, 'bi-droplet-fill');
 
