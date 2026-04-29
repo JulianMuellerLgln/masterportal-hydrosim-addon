@@ -17,6 +17,11 @@
 // CSS — injected once as a <style> tag
 // ---------------------------------------------------------------------------
 const PANEL_CSS = `
+:root {
+  --hs-accent: #d20f2a;
+  --hs-accent-2: #b70d24;
+  --hs-accent-soft: #f4c4cb;
+}
 #hydrosim-trigger {
   position: fixed;
   bottom: 100px;
@@ -25,7 +30,7 @@ const PANEL_CSS = `
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  background: #1565c0;
+  background: var(--hs-accent);
   color: #fff;
   border: none;
   cursor: pointer;
@@ -36,7 +41,7 @@ const PANEL_CSS = `
   font-size: 1.25rem;
   transition: background 0.2s;
 }
-#hydrosim-trigger:hover { background: #1976d2; }
+#hydrosim-trigger:hover { background: var(--hs-accent-2); }
 
 #hydrosim-panel {
   position: fixed;
@@ -58,7 +63,7 @@ const PANEL_CSS = `
 #hydrosim-panel.visible { display: flex; }
 
 #hydrosim-header {
-  background: #1565c0;
+  background: var(--hs-accent);
   padding: 10px 14px;
   border-radius: 10px 10px 0 0;
   display: flex;
@@ -85,15 +90,15 @@ const PANEL_CSS = `
   font-size: 0.70rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #90caf9;
+  color: var(--hs-accent-soft);
   margin-bottom: 6px;
 }
 
 .hs-draw-btn {
   width: 100%;
-  background: #0d47a1;
+  background: #4c1119;
   color: #fff;
-  border: 1px solid #1565c0;
+  border: 1px solid var(--hs-accent);
   border-radius: 6px;
   padding: 7px 10px;
   cursor: pointer;
@@ -103,15 +108,15 @@ const PANEL_CSS = `
   align-items: center;
   gap: 6px;
 }
-.hs-draw-btn:hover:not(:disabled) { background: #1976d2; }
+.hs-draw-btn:hover:not(:disabled) { background: var(--hs-accent); }
 .hs-draw-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .hs-draw-btn.active { background: #2e7d32; border-color: #43a047; }
 
 .hs-mode-select {
   width: 100%;
   background: #263238;
-  color: #e3f2fd;
-  border: 1px solid #37474f;
+  color: #fbe9ec;
+  border: 1px solid #6d2b36;
   border-radius: 6px;
   padding: 7px 8px;
   font-size: 0.82rem;
@@ -133,7 +138,7 @@ const PANEL_CSS = `
 
 input[type=range].hs-range {
   width: 100%;
-  accent-color: #42a5f5;
+  accent-color: var(--hs-accent);
   height: 4px;
   cursor: pointer;
 }
@@ -150,10 +155,10 @@ input[type=range].hs-range {
   transition: opacity 0.15s;
 }
 .hs-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-.hs-btn-run   { background: #1b5e20; color: #c8e6c9; }
+.hs-btn-run   { background: var(--hs-accent); color: #fff; }
 .hs-btn-pause { background: #e65100; color: #fff3e0; }
 .hs-btn-reset { background: #37474f; color: #eceff1; }
-.hs-btn-run:hover:not(:disabled)   { background: #2e7d32; }
+.hs-btn-run:hover:not(:disabled)   { background: var(--hs-accent-2); }
 .hs-btn-pause:hover:not(:disabled) { background: #bf360c; }
 .hs-btn-reset:hover:not(:disabled) { background: #546e7a; }
 
@@ -176,7 +181,7 @@ input[type=range].hs-range {
 }
 #hs-progress-bar {
   height: 100%;
-  background: #42a5f5;
+  background: var(--hs-accent);
   width: 0%;
   transition: width 0.3s ease;
   border-radius: 2px;
@@ -191,7 +196,7 @@ input[type=range].hs-range {
   color: #cfd8dc;
 }
 #hs-impact-table th {
-  color: #90caf9;
+  color: var(--hs-accent-soft);
   text-align: left;
   font-weight: 500;
   padding: 3px 4px;
@@ -204,7 +209,7 @@ input[type=range].hs-range {
 .hs-score-bar {
   display: inline-block;
   height: 8px;
-  background: #1565c0;
+  background: var(--hs-accent);
   border-radius: 2px;
   vertical-align: middle;
   margin-right: 4px;
@@ -224,7 +229,7 @@ input[type=range].hs-range {
   color: #cfd8dc;
 }
 .hs-measure-row input[type=checkbox] {
-  accent-color: #42a5f5;
+  accent-color: var(--hs-accent);
 }
 .hs-measure-help {
   font-size: 0.70rem;

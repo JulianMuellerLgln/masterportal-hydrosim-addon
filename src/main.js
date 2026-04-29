@@ -294,9 +294,9 @@ import { createPanel } from './panel.js';
 
     // Guard against non-finite solver outputs to keep dt and UI stable.
     const rawMaxDepth = wasmExports.maxDepth();
-    const safeMaxDepth = Number.isFinite(rawMaxDepth) && rawMaxDepth > 0 ? Math.min(rawMaxDepth, 10) : 0.01;
+    const safeMaxDepth = Number.isFinite(rawMaxDepth) && rawMaxDepth > 0 ? Math.min(rawMaxDepth, 4) : 0.01;
     const maxH = Math.max(0.01, safeMaxDepth);
-    const dt = Math.min((dx / Math.sqrt(9.81 * maxH)) * 0.45, 4.0);
+    const dt = Math.min((dx / Math.sqrt(9.81 * maxH)) * 0.45, 0.5);
     const stepsPerFrame = Math.max(1, Math.round(params.speed));
 
     let src = null;
@@ -314,7 +314,7 @@ import { createPanel } from './panel.js';
           - (measures.dike ? 0.10 * level : 0)
       );
       const effectiveFlux = fluxM3ps * mf.inflow * measureReduction;
-      depthPerStep = Math.max(0, Math.min(0.01, (effectiveFlux / sourceAreaM2) * dt));
+      depthPerStep = Math.max(0, Math.min(0.0002, (effectiveFlux / sourceAreaM2) * dt));
     }
 
     const frictionBoost =
@@ -322,7 +322,7 @@ import { createPanel } from './panel.js';
       + (measures.dike ? 0.55 * level : 0)
       + (measures.retention ? 0.35 * level : 0)
       + (measures.pump ? 0.15 * level : 0);
-    const cf = Math.max(0.01, 0.025 * mf.friction * frictionBoost);
+    const cf = Math.max(0.02, 0.06 * mf.friction * frictionBoost);
 
     for (let i = 0; i < stepsPerFrame; i++) {
       if (src) {
@@ -349,7 +349,7 @@ import { createPanel } from './panel.js';
     }
 
     const maxDepthRaw = wasmExports.maxDepth();
-    const maxDepth = Number.isFinite(maxDepthRaw) && maxDepthRaw >= 0 ? Math.min(maxDepthRaw, 99) : 0;
+    const maxDepth = Number.isFinite(maxDepthRaw) && maxDepthRaw >= 0 ? Math.min(maxDepthRaw, 20) : 0;
     ui.setProgress(Math.min(1, simT / params.durationS));
     ui.setStatus(`T = ${Math.round(simT)}s · max. Tiefe ${maxDepth.toFixed(2)} m`, 'bi-droplet-fill');
 

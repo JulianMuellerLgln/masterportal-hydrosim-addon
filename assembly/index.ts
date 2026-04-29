@@ -46,8 +46,9 @@ let ZB_OFF: i32 = 0;
 
 let SIM_T:     f32 = 0.0;  // elapsed simulation time in seconds
 let MAX_DEPTH: f32 = 0.0;  // peak depth seen this step (exposed to JS)
-const MAX_CELL_DEPTH: f32 = 20.0;
-const MAX_VEL: f32 = 25.0;
+const MAX_CELL_DEPTH: f32 = 30.0;
+const MAX_VEL: f32 = 12.0;
+const DRAINAGE_RATE: f32 = 0.000025;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -229,6 +230,8 @@ export function step(dt: f32, g: f32, cf: f32): void {
 
       let hn: f32 = h - dt * (dq_x + dq_y);
       if (!isFinite(hn)) hn = 0.0;
+      // Simple drainage/infiltration term to avoid unrealistic long-term pooling.
+      hn -= DRAINAGE_RATE * dt;
       if (hn < 0.0) hn = 0.0;
       if (hn > MAX_CELL_DEPTH) hn = MAX_CELL_DEPTH;
 
