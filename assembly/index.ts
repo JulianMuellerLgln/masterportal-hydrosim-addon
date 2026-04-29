@@ -91,6 +91,21 @@ export function init(nx: i32, ny: i32, dx: f32): i32 {
   // Start at 4096 bytes (1 Wasm page = 64 KiB; page 0 is runtime, so use 4 KiB
   // offset to be safe with any runtime header).
   const BASE: i32 = 4096;
+
+  // Ensure linear memory is large enough before touching any offsets.
+  // Required bytes: BASE + 7 grids (h, hn, u, un, v, vn, zb).
+  const requiredBytes: i32 = BASE + gridBytes * 7;
+  const currentBytes: i32 = memory.size() << 16; // pages * 64 KiB
+  if (requiredBytes > currentBytes) {
+    const missingBytes: i32 = requiredBytes - currentBytes;
+    const pagesNeeded: i32 = (missingBytes + 65535) >> 16;
+    const grownFrom: i32 = memory.grow(pagesNeeded);
+    if (grownFrom < 0) {
+      // Signal allocation failure to JS caller.
+      return -1;
+    }
+  }
+
   H_OFF  = BASE;
   HN_OFF = H_OFF  + gridBytes;
   U_OFF  = HN_OFF + gridBytes;

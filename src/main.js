@@ -17,6 +17,30 @@ import { createPanel } from './panel.js';
     return window.mapCollection?.getMap?.('3D')?.getCesiumScene?.() ?? null;
   }
 
+  function getMapMode() {
+    const store = document.getElementById('masterportal-root')
+      ?.__vue_app__?.config?.globalProperties?.$store;
+    return store?.state?.Maps?.mode ?? null;
+  }
+
+  async function ensure3DMode() {
+    const store = document.getElementById('masterportal-root')
+      ?.__vue_app__?.config?.globalProperties?.$store;
+    if (!store) return false;
+    if (store.state?.Maps?.mode === '3D') return true;
+    try {
+      await store.dispatch('Maps/activateMap3d');
+      return true;
+    } catch (_e) {
+      try {
+        await store.dispatch('Maps/changeMapMode', '3D');
+        return true;
+      } catch (_e2) {
+        return false;
+      }
+    }
+  }
+
   async function waitForCesium() {
     return new Promise(resolve => {
       const iv = setInterval(() => {
@@ -172,23 +196,36 @@ import { createPanel } from './panel.js';
     const dt = Math.min((dx / Math.sqrt(9.81 * maxH)) * 0.45, 4.0);
     const stepsPerFrame = Math.max(1, Math.round(params.speed));
 
+    let src = null;
+    let depthPerStep = 0;
     if (polygonCoords && polygonCoords.length >= 3) {
-      const src = computeSourceCenter(polygonCoords, nx, ny, dx, originLon, originLat);
+      src = computeSourceCenter(polygonCoords, nx, ny, dx, originLon, originLat);
       const sourceAreaCells = Math.max(1, Math.PI * src.radius * src.radius);
       const sourceAreaM2 = sourceAreaCells * dx * dx;
       const fluxM3ps = params.volumeM3 / params.durationS;
-      const depthPerStep = (fluxM3ps / sourceAreaM2) * dt;
-      wasmExports.injectSource(src.cx, src.cy, src.radius, Math.max(0, depthPerStep));
+      depthPerStep = Math.max(0, (fluxM3ps / sourceAreaM2) * dt);
     }
 
     for (let i = 0; i < stepsPerFrame; i++) {
+      if (src) {
+        wasmExports.injectSource(src.cx, src.cy, src.radius, depthPerStep);
+      }
       wasmExports.step(dt, 9.81, 0.025);
       simT += dt;
       if (simT >= params.durationS) break;
     }
 
     ensureRenderer();
-    waterRenderer?.update(wasmMemory.buffer, wasmExports.hPtr(), nx, ny, dx, originLon, originLat);
+    waterRenderer?.update(
+      wasmMemory.buffer,
+      wasmExports.hPtr(),
+      wasmExports.zbPtr(),
+      nx,
+      ny,
+      dx,
+      originLon,
+      originLat
+    );
 
     const maxDepth = wasmExports.maxDepth();
     ui.setProgress(Math.min(1, simT / params.durationS));
@@ -202,7 +239,7 @@ import { createPanel } from './panel.js';
     animFrameId = requestAnimationFrame(tickLoop);
   }
 
-  ui.onDraw(() => {
+  ui.onDraw(async () => {
     if (state === 'drawing') {
       drawHandler?.destroy();
       drawHandler = null;
@@ -212,6 +249,14 @@ import { createPanel } from './panel.js';
     }
 
     if (!['idle', 'ready', 'results'].includes(state)) return;
+
+    if (getMapMode() !== '3D') {
+      const switched = await ensure3DMode();
+      if (!switched) {
+        ui.setStatus('Bitte zuerst in den 3D-Modus wechseln.', 'bi-exclamation-triangle');
+        return;
+      }
+    }
 
     const scene = getScene();
     if (!scene) {

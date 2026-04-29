@@ -15,7 +15,7 @@
  *   3m+  → rgba(  0, 20,100, 0.90)   deep cobalt
  */
 
-const MIN_DEPTH = 0.05;   // cells shallower than this are invisible
+const MIN_DEPTH = 0.01;   // cells shallower than this are invisible
 
 /** Linearly interpolate between two numbers. */
 function lerp(a, b, t) { return a + (b - a) * t; }
@@ -47,7 +47,7 @@ function depthColor(h) {
  * @param {number}       originLat  SW corner latitude in degrees
  * @returns {Cesium.Primitive|null}
  */
-function buildWaterPrimitive(h, nx, ny, dx, originLon, originLat) {
+function buildWaterPrimitive(h, zb, nx, ny, dx, originLon, originLat) {
   // Metres-per-degree conversion at this latitude
   const midLat = originLat + ((ny / 2) * dx / 111000);
   const mPerDegLat = 111000;
@@ -59,9 +59,15 @@ function buildWaterPrimitive(h, nx, ny, dx, originLon, originLat) {
   const positions = [];
   const colors    = [];
 
+  function pushDeg(lon, lat, height) {
+    const c = Cesium.Cartesian3.fromDegrees(lon, lat, height);
+    positions.push(c.x, c.y, c.z);
+  }
+
   for (let row = 0; row < ny - 1; row++) {
     for (let col = 0; col < nx - 1; col++) {
-      const depth = h[row * nx + col];
+      const idx = row * nx + col;
+      const depth = h[idx];
       if (depth < MIN_DEPTH) continue;
 
       const lon0 = originLon + col * dLon;
@@ -69,22 +75,18 @@ function buildWaterPrimitive(h, nx, ny, dx, originLon, originLat) {
       const lon1 = lon0 + dLon;
       const lat1 = lat0 + dLat;
 
-      // Slight height offset so water floats above terrain (0.3m)
-      const elev = 0.3;
+      // Place surface above terrain mesh using WASM bed elevation + water depth.
+      const elev = zb[idx] + depth + 0.05;
 
       // Two triangles per quad (CCW winding, facing up)
       // Triangle 1: SW, SE, NE
-      positions.push(
-        ...Cesium.Cartesian3.fromDegrees(lon0, lat0, elev).toArray(),
-        ...Cesium.Cartesian3.fromDegrees(lon1, lat0, elev).toArray(),
-        ...Cesium.Cartesian3.fromDegrees(lon1, lat1, elev).toArray()
-      );
+      pushDeg(lon0, lat0, elev);
+      pushDeg(lon1, lat0, elev);
+      pushDeg(lon1, lat1, elev);
       // Triangle 2: SW, NE, NW
-      positions.push(
-        ...Cesium.Cartesian3.fromDegrees(lon0, lat0, elev).toArray(),
-        ...Cesium.Cartesian3.fromDegrees(lon1, lat1, elev).toArray(),
-        ...Cesium.Cartesian3.fromDegrees(lon0, lat1, elev).toArray()
-      );
+      pushDeg(lon0, lat0, elev);
+      pushDeg(lon1, lat1, elev);
+      pushDeg(lon0, lat1, elev);
 
       const [r, g, b, a] = depthColor(depth);
       const rc = Math.round(r * 255);
@@ -118,11 +120,7 @@ function buildWaterPrimitive(h, nx, ny, dx, originLon, originLat) {
       })
     },
     primitiveType: Cesium.PrimitiveType.TRIANGLES,
-    boundingSphere: Cesium.BoundingSphere.fromVertices(
-      Array.from({ length: positions.length / 3 }, (_, i) =>
-        new Cesium.Cartesian3(positions[i*3], positions[i*3+1], positions[i*3+2])
-      )
-    )
+    boundingSphere: Cesium.BoundingSphere.fromVertices(posArr)
   });
 
   return new Cesium.Primitive({
@@ -163,11 +161,12 @@ export function createWaterRenderer(scene) {
      * @param {number}      originLon  — degrees
      * @param {number}      originLat  — degrees
      */
-    update(wasmBuffer, hOff, nx, ny, dx, originLon, originLat) {
+    update(wasmBuffer, hOff, zbOff, nx, ny, dx, originLon, originLat) {
       // Zero-copy view into WASM heap — no data transfer overhead
       const h = new Float32Array(wasmBuffer, hOff, nx * ny);
+      const zb = new Float32Array(wasmBuffer, zbOff, nx * ny);
 
-      const next = buildWaterPrimitive(h, nx, ny, dx, originLon, originLat);
+      const next = buildWaterPrimitive(h, zb, nx, ny, dx, originLon, originLat);
 
       remove(current);
       if (next) {
