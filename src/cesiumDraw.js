@@ -86,6 +86,29 @@ export function startPolygonDraw(scene, onComplete) {
     return pos;
   }
 
+  function toCoords(ps) {
+    return ps.map(p => {
+      const carto = Cesium.Cartographic.fromCartesian(p);
+      return {
+        lon: Cesium.Math.toDegrees(carto.longitude),
+        lat: Cesium.Math.toDegrees(carto.latitude)
+      };
+    });
+  }
+
+  function tryComplete() {
+    if (positions.length < 3) {
+      console.warn('[HydroSim] Need at least 3 vertices to form a polygon.');
+      return false;
+    }
+    const coords = toCoords(positions);
+    handler.destroy();
+    preview.destroy();
+    canvas.style.cursor = '';
+    onComplete(coords);
+    return true;
+  }
+
   // Cursor style: crosshair during draw
   canvas.style.cursor = 'crosshair';
 
@@ -98,28 +121,17 @@ export function startPolygonDraw(scene, onComplete) {
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
   handler.setInputAction((click) => {
-    // Double-click: last LEFT_CLICK already added the duplicate — remove it
-    if (positions.length > 0) positions.pop();
-    preview.addPoint(positions[positions.length - 1]);
-
-    if (positions.length < 3) {
-      console.warn('[HydroSim] Need at least 3 vertices to form a polygon.');
-      return;
+    // If the double-click happened on a new location, add it once.
+    const pos = pickPosition(click);
+    if (pos && positions.length > 0) {
+      const d = Cesium.Cartesian3.distance(pos, positions[positions.length - 1]);
+      if (d > 0.5) {
+        positions.push(pos);
+        preview.addPoint(pos);
+        preview.updatePreview(positions);
+      }
     }
-
-    // Convert to geographic coords for downstream terrain sampling
-    const coords = positions.map(p => {
-      const carto = Cesium.Cartographic.fromCartesian(p);
-      return {
-        lon: Cesium.Math.toDegrees(carto.longitude),
-        lat: Cesium.Math.toDegrees(carto.latitude)
-      };
-    });
-
-    handler.destroy();
-    preview.destroy();
-    canvas.style.cursor = '';
-    onComplete(coords);
+    tryComplete();
   }, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
 
   // Escape or right-click cancels
@@ -129,7 +141,9 @@ export function startPolygonDraw(scene, onComplete) {
     canvas.style.cursor = '';
   }
 
-  handler.setInputAction(cancelDraw, Cesium.ScreenSpaceEventType.RIGHT_CLICK);
+  handler.setInputAction(() => {
+    if (!tryComplete()) cancelDraw();
+  }, Cesium.ScreenSpaceEventType.RIGHT_CLICK);
 
   document.addEventListener('keydown', function onKey(e) {
     if (e.key === 'Escape') {
