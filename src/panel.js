@@ -389,6 +389,8 @@ export function createPanel() {
   const impactSec   = $('hs-impact-section');
   const impactCount = $('hs-impact-count');
   const impactTbody = $('hs-impact-tbody');
+  let panelState    = 'idle';
+  let gateEnabled   = true;
 
   // Toggle panel visibility
   trigger.addEventListener('click', () => {
@@ -444,8 +446,9 @@ export function createPanel() {
     /** Update the panel to reflect current simulation state. */
     setState(state) {
       // state: 'idle' | 'drawing' | 'sampling' | 'ready' | 'running' | 'paused' | 'results'
-      drawBtn.disabled  = ['drawing', 'sampling', 'running'].includes(state);
-      runBtn.disabled   = !['ready', 'paused'].includes(state);
+      panelState = state;
+      drawBtn.disabled  = !gateEnabled || ['drawing', 'sampling', 'running'].includes(state);
+      runBtn.disabled   = !gateEnabled || !['ready', 'paused'].includes(state);
       pauseBtn.disabled = state !== 'running';
       resetBtn.disabled = state === 'sampling';
 
@@ -461,6 +464,13 @@ export function createPanel() {
 
       if (state === 'idle')    impactSec.classList.remove('visible');
       if (state === 'results') impactSec.classList.add('visible');
+    },
+
+    /** External gate control (e.g. camera-height dependent activation). */
+    setGate(enabled) {
+      gateEnabled = !!enabled;
+      // Re-apply button enablement for current state.
+      this.setState(panelState);
     },
 
     /** Set status text line. */

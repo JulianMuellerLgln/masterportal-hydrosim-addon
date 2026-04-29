@@ -21,23 +21,97 @@ function createPreviewEntities(viewer) {
   viewer.scene.primitives.add(polys);
 
   let polyline = null;
+  let drawLinePrimitive = null;
+  let drawFillPrimitive = null;
+
+  function removePrimitive(p) {
+    if (p && !p.isDestroyed()) {
+      viewer.scene.primitives.remove(p);
+    }
+  }
+
+  function toDrapedPoint(cartesian) {
+    const carto = Cesium.Cartographic.fromCartesian(cartesian);
+    const h = viewer.scene.globe.getHeight(carto);
+    const z = Number.isFinite(h) ? h + 0.2 : carto.height;
+    return Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, z);
+  }
+
+  function densifyDrapedLine(segmentStart, segmentEnd, stepCount = 10) {
+    const a = Cesium.Cartographic.fromCartesian(segmentStart);
+    const b = Cesium.Cartographic.fromCartesian(segmentEnd);
+    const pts = [];
+    for (let i = 0; i <= stepCount; i++) {
+      const t = i / stepCount;
+      const lon = Cesium.Math.lerp(a.longitude, b.longitude, t);
+      const lat = Cesium.Math.lerp(a.latitude, b.latitude, t);
+      const probe = new Cesium.Cartographic(lon, lat);
+      const h = viewer.scene.globe.getHeight(probe);
+      const z = Number.isFinite(h) ? h + 0.25 : Cesium.Math.lerp(a.height, b.height, t);
+      pts.push(Cesium.Cartesian3.fromRadians(lon, lat, z));
+    }
+    return pts;
+  }
+
+  function buildDrapedRing(positions) {
+    if (positions.length < 2) return [];
+    const ring = [];
+    for (let i = 0; i < positions.length - 1; i++) {
+      const dense = densifyDrapedLine(positions[i], positions[i + 1]);
+      if (i > 0) dense.shift();
+      ring.push(...dense);
+    }
+    return ring;
+  }
 
   return {
     points,
     polys,
     updatePreview(positions) {
-      // Remove old polyline and add fresh one
+      // Remove old simple polyline and add fresh one
       polys.removeAll();
+      removePrimitive(drawLinePrimitive);
+      removePrimitive(drawFillPrimitive);
+      drawLinePrimitive = null;
+      drawFillPrimitive = null;
+
       if (positions.length >= 2) {
         const closed = [...positions, positions[0]];
+        const ring = buildDrapedRing(closed);
         polyline = polys.add({
-          positions: closed,
+          positions: ring.length > 0 ? ring : closed,
           width: 2.5,
           material: Cesium.Material.fromType('Color', {
             color: Cesium.Color.fromCssColorString('#4af')
           }),
           loop: false
         });
+      }
+
+      if (positions.length >= 3) {
+        const draped = positions.map(toDrapedPoint);
+        const geometry = new Cesium.PolygonGeometry({
+          polygonHierarchy: new Cesium.PolygonHierarchy(draped),
+          perPositionHeight: true,
+          vertexFormat: Cesium.PerInstanceColorAppearance.VERTEX_FORMAT
+        });
+
+        drawFillPrimitive = new Cesium.Primitive({
+          geometryInstances: new Cesium.GeometryInstance({
+            geometry,
+            attributes: {
+              color: Cesium.ColorGeometryInstanceAttribute.fromColor(
+                Cesium.Color.fromCssColorString('#4af').withAlpha(0.22)
+              )
+            }
+          }),
+          appearance: new Cesium.PerInstanceColorAppearance({
+            translucent: true,
+            closed: false
+          }),
+          asynchronous: false
+        });
+        viewer.scene.primitives.add(drawFillPrimitive);
       }
     },
     addPoint(position) {
@@ -50,6 +124,8 @@ function createPreviewEntities(viewer) {
       });
     },
     destroy() {
+      removePrimitive(drawLinePrimitive);
+      removePrimitive(drawFillPrimitive);
       viewer.scene.primitives.remove(points);
       viewer.scene.primitives.remove(polys);
     }

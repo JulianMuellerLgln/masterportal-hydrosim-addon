@@ -97,6 +97,8 @@ import { createPanel } from './panel.js';
   let waterRenderer = null;
   let animFrameId = null;
   let simT = 0;
+  let frameCounter = 0;
+  const MAX_INTERACTIVE_CAMERA_HEIGHT_M = 8000;
 
   function setState(next) {
     state = next;
@@ -111,13 +113,49 @@ import { createPanel } from './panel.js';
     }
   }
 
+  function cameraHeightOk() {
+    const scene = getScene();
+    const camera = scene?.camera;
+    if (!camera || !window.Cesium) return false;
+    const carto = window.Cesium.Cartographic.fromCartesian(camera.positionWC);
+    return Number.isFinite(carto.height) && carto.height <= MAX_INTERACTIVE_CAMERA_HEIGHT_M;
+  }
+
+  function applyInteractionGate() {
+    const ok = cameraHeightOk();
+    ui.setGate(ok);
+    if (!ok && state === 'idle') {
+      ui.setStatus(
+        `Für HydroSim näher heranzoomen (Kamerahöhe < ${MAX_INTERACTIVE_CAMERA_HEIGHT_M} m).`,
+        'bi-zoom-in'
+      );
+    }
+    if (ok && state === 'idle') {
+      ui.setStatus('Bereit — Polygon zeichnen um zu beginnen', 'bi-info-circle');
+    }
+    return ok;
+  }
+
+  function samplingResolutionForCamera() {
+    const scene = getScene();
+    const camera = scene?.camera;
+    if (!camera || !window.Cesium) return 50;
+    const carto = window.Cesium.Cartographic.fromCartesian(camera.positionWC);
+    const h = carto.height;
+    if (!Number.isFinite(h)) return 50;
+    if (h < 2500) return 20;
+    if (h < 5000) return 30;
+    return 50;
+  }
+
   async function runTerrainSampling(scene) {
     setState('sampling');
     ui.setStatus('Terrain wird abgetastet…', 'bi-hourglass-split');
     ui.setProgress(0.05);
 
     try {
-      terrainInfo = await sampleTerrainGrid(scene, polygonCoords, 50, p => ui.setProgress(p * 0.9));
+      const resM = samplingResolutionForCamera();
+      terrainInfo = await sampleTerrainGrid(scene, polygonCoords, resM, p => ui.setProgress(p * 0.9));
       ui.setProgress(1.0);
 
       const { heights, nx, ny, dx } = terrainInfo;
@@ -215,17 +253,20 @@ import { createPanel } from './panel.js';
       if (simT >= params.durationS) break;
     }
 
-    ensureRenderer();
-    waterRenderer?.update(
-      wasmMemory.buffer,
-      wasmExports.hPtr(),
-      wasmExports.zbPtr(),
-      nx,
-      ny,
-      dx,
-      originLon,
-      originLat
-    );
+    frameCounter += 1;
+    if (frameCounter % 2 === 0) {
+      ensureRenderer();
+      waterRenderer?.update(
+        wasmMemory.buffer,
+        wasmExports.hPtr(),
+        wasmExports.zbPtr(),
+        nx,
+        ny,
+        dx,
+        originLon,
+        originLat
+      );
+    }
 
     const maxDepth = wasmExports.maxDepth();
     ui.setProgress(Math.min(1, simT / params.durationS));
@@ -249,6 +290,8 @@ import { createPanel } from './panel.js';
     }
 
     if (!['idle', 'ready', 'results'].includes(state)) return;
+
+    if (!applyInteractionGate()) return;
 
     if (getMapMode() !== '3D') {
       const switched = await ensure3DMode();
@@ -275,6 +318,8 @@ import { createPanel } from './panel.js';
   });
 
   ui.onRun(() => {
+    if (!applyInteractionGate()) return;
+
     if (!terrainInfo || !wasmExports) return;
     if (!['ready', 'paused'].includes(state)) return;
 
@@ -320,7 +365,8 @@ import { createPanel } from './panel.js';
   });
 
   setState('idle');
-  ui.setStatus('Bereit — Polygon zeichnen um zu beginnen', 'bi-info-circle');
+  applyInteractionGate();
+  const gateInterval = setInterval(applyInteractionGate, 800);
 
   window.HydroSim = {
     getState: () => state,
@@ -331,6 +377,9 @@ import { createPanel } from './panel.js';
       cancelAnimationFrame(animFrameId);
       animFrameId = null;
       setState('paused');
+    },
+    destroy: () => {
+      clearInterval(gateInterval);
     }
   };
 })();
