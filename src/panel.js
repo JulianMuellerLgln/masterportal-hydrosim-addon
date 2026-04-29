@@ -30,7 +30,7 @@ const PANEL_CSS = `
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  background: var(--hs-accent);
+  background: #1565c0;
   color: #fff;
   border: none;
   cursor: pointer;
@@ -41,7 +41,7 @@ const PANEL_CSS = `
   font-size: 1.25rem;
   transition: background 0.2s;
 }
-#hydrosim-trigger:hover { background: var(--hs-accent-2); }
+#hydrosim-trigger:hover { background: #1976d2; }
 
 #hydrosim-panel {
   position: fixed;
@@ -220,6 +220,37 @@ input[type=range].hs-range {
   border-top: 1px solid #263238;
   padding-top: 10px;
 }
+.hs-analysis-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.hs-analysis-select {
+  width: 100%;
+  background: #263238;
+  color: #fbe9ec;
+  border: 1px solid #6d2b36;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 0.78rem;
+}
+.hs-analysis-btn {
+  width: 100%;
+  background: #263238;
+  color: #fff;
+  border: 1px solid #6d2b36;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.hs-analysis-btn:hover:not(:disabled) {
+  background: #3a1d24;
+}
+.hs-analysis-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .hs-measure-row {
   display: flex;
   align-items: center;
@@ -367,6 +398,31 @@ const PANEL_HTML = `
     </div>
   </div>
 
+  <div class="hs-section" style="margin-top:10px">
+    <div class="hs-section-title">
+      <i class="bi bi-layers"></i> Analyse-Layer
+    </div>
+    <div class="hs-label">
+      Weitere Analyse
+      <span><span id="hs-layer-count">0</span> Layer</span>
+    </div>
+    <select id="hs-layer-strategy" class="hs-analysis-select">
+      <option value="append" selected>Zur aktiven Analyse hinzufügen</option>
+      <option value="new">Neue Analyse-Layer erstellen</option>
+    </select>
+    <div class="hs-analysis-row">
+      <select id="hs-layer-active" class="hs-analysis-select"></select>
+      <button id="hs-layer-clear" class="hs-analysis-btn" title="Aktive Analyse entfernen">
+        <i class="bi bi-trash"></i>
+      </button>
+    </div>
+    <div class="hs-analysis-row">
+      <button id="hs-export-geojson" class="hs-analysis-btn">
+        <i class="bi bi-download"></i> Ergebnis als GeoJSON exportieren
+      </button>
+    </div>
+  </div>
+
 </div>
 `;
 
@@ -424,6 +480,11 @@ export function createPanel() {
   const impactSec   = $('hs-impact-section');
   const impactCount = $('hs-impact-count');
   const impactTbody = $('hs-impact-tbody');
+  const layerStrategy = $('hs-layer-strategy');
+  const layerActive = $('hs-layer-active');
+  const layerCount = $('hs-layer-count');
+  const layerClear = $('hs-layer-clear');
+  const exportGeoJson = $('hs-export-geojson');
   let panelState    = 'idle';
   let gateEnabled   = true;
 
@@ -483,6 +544,37 @@ export function createPanel() {
     onRun(fn)   { runBtn.addEventListener('click', fn); },
     onPause(fn) { pauseBtn.addEventListener('click', fn); },
     onReset(fn) { resetBtn.addEventListener('click', fn); },
+    onExport(fn) { exportGeoJson.addEventListener('click', fn); },
+    onLayerClear(fn) { layerClear.addEventListener('click', fn); },
+    onLayerActiveChange(fn) { layerActive.addEventListener('change', fn); },
+
+    getLayerStrategy() {
+      return layerStrategy.value || 'append';
+    },
+
+    getActiveLayerId() {
+      return layerActive.value || '';
+    },
+
+    setAnalysisLayers(layers, activeId) {
+      layerActive.innerHTML = '';
+      for (const layer of layers) {
+        const opt = document.createElement('option');
+        opt.value = layer.id;
+        opt.textContent = layer.label;
+        if (activeId && activeId === layer.id) opt.selected = true;
+        layerActive.appendChild(opt);
+      }
+      if (layers.length === 0) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = 'Keine Analyse vorhanden';
+        layerActive.appendChild(opt);
+      }
+      layerCount.textContent = String(layers.length);
+      layerClear.disabled = layers.length === 0;
+      exportGeoJson.disabled = layers.length === 0;
+    },
 
     /** Update the panel to reflect current simulation state. */
     setState(state) {
@@ -505,6 +597,9 @@ export function createPanel() {
 
       if (state === 'idle')    impactSec.classList.remove('visible');
       if (state === 'results') impactSec.classList.add('visible');
+
+      const hasResult = ['ready', 'running', 'paused', 'results'].includes(state);
+      exportGeoJson.disabled = !hasResult;
     },
 
     /** External gate control (e.g. camera-height dependent activation). */

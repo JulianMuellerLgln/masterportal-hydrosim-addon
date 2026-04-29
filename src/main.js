@@ -102,6 +102,9 @@ import { createPanel } from './panel.js';
   const impactCache = new Map();
   const IMPACT_CACHE_MAX = 10;
   const MAX_INTERACTIVE_CAMERA_HEIGHT_M = 8000;
+  const analysisLayers = new Map();
+  let activeAnalysisLayerId = null;
+  let analysisCounter = 1;
 
   function setState(next) {
     state = next;
@@ -114,6 +117,184 @@ import { createPanel } from './panel.js';
       const scene = getScene();
       if (scene) waterRenderer = createWaterRenderer(scene);
     }
+  }
+
+  function refreshAnalysisUi() {
+    const layers = Array.from(analysisLayers.values()).map(l => ({
+      id: l.id,
+      label: `${l.name} (${l.meta.nx}x${l.meta.ny})`
+    }));
+    ui.setAnalysisLayers(layers, activeAnalysisLayerId);
+  }
+
+  function createAnalysisLayerId() {
+    return `analysis-${Date.now()}-${analysisCounter++}`;
+  }
+
+  function terrainCompatible(a, b) {
+    if (!a || !b) return false;
+    return a.nx === b.nx
+      && a.ny === b.ny
+      && Math.round(a.dx * 1000) === Math.round(b.dx * 1000);
+  }
+
+  function captureCurrentSnapshot() {
+    if (!terrainInfo || !wasmMemory || !wasmExports) return null;
+    const { nx, ny, dx, originLon, originLat } = terrainInfo;
+    const n = nx * ny;
+    const h = new Float32Array(wasmMemory.buffer, wasmExports.hPtr(), n);
+    const zb = new Float32Array(wasmMemory.buffer, wasmExports.zbPtr(), n);
+    return {
+      meta: { nx, ny, dx, originLon, originLat },
+      depth: new Float32Array(h),
+      bed: new Float32Array(zb)
+    };
+  }
+
+  function upsertAnalysisLayer(strategy) {
+    const snap = captureCurrentSnapshot();
+    if (!snap) return;
+    ensureRenderer();
+
+    let targetId = activeAnalysisLayerId;
+    if (strategy === 'new' || !targetId || !analysisLayers.has(targetId)) {
+      targetId = createAnalysisLayerId();
+      const layer = {
+        id: targetId,
+        name: `Analyse ${analysisLayers.size + 1}`,
+        meta: snap.meta,
+        depth: snap.depth,
+        bed: snap.bed
+      };
+      analysisLayers.set(targetId, layer);
+      activeAnalysisLayerId = targetId;
+      waterRenderer?.upsertStaticLayer(
+        layer.id,
+        layer.depth,
+        layer.bed,
+        layer.meta.nx,
+        layer.meta.ny,
+        layer.meta.dx,
+        layer.meta.originLon,
+        layer.meta.originLat
+      );
+      refreshAnalysisUi();
+      return;
+    }
+
+    const layer = analysisLayers.get(targetId);
+    if (!terrainCompatible(layer.meta, snap.meta)) {
+      const fallbackId = createAnalysisLayerId();
+      const fallback = {
+        id: fallbackId,
+        name: `Analyse ${analysisLayers.size + 1}`,
+        meta: snap.meta,
+        depth: snap.depth,
+        bed: snap.bed
+      };
+      analysisLayers.set(fallbackId, fallback);
+      activeAnalysisLayerId = fallbackId;
+      waterRenderer?.upsertStaticLayer(
+        fallback.id,
+        fallback.depth,
+        fallback.bed,
+        fallback.meta.nx,
+        fallback.meta.ny,
+        fallback.meta.dx,
+        fallback.meta.originLon,
+        fallback.meta.originLat
+      );
+      refreshAnalysisUi();
+      return;
+    }
+
+    for (let i = 0; i < layer.depth.length; i++) {
+      const a = layer.depth[i];
+      const b = snap.depth[i];
+      layer.depth[i] = Number.isFinite(a) && Number.isFinite(b) ? Math.max(a, b) : (Number.isFinite(a) ? a : (Number.isFinite(b) ? b : 0));
+    }
+    waterRenderer?.upsertStaticLayer(
+      layer.id,
+      layer.depth,
+      layer.bed,
+      layer.meta.nx,
+      layer.meta.ny,
+      layer.meta.dx,
+      layer.meta.originLon,
+      layer.meta.originLat
+    );
+    refreshAnalysisUi();
+  }
+
+  function exportActiveAsGeoJson() {
+    const layer = activeAnalysisLayerId ? analysisLayers.get(activeAnalysisLayerId) : null;
+    const source = layer ? {
+      meta: layer.meta,
+      depth: layer.depth
+    } : captureCurrentSnapshot();
+    if (!source) {
+      ui.setStatus('Kein Ergebnis zum Export vorhanden.', 'bi-exclamation-circle');
+      return;
+    }
+
+    const { nx, ny, dx, originLon, originLat } = source.meta;
+    const h = source.depth;
+    const mPerDegLat = 111000;
+    const midLat = originLat + ((ny / 2) * dx / mPerDegLat);
+    const mPerDegLon = 111000 * Math.cos(midLat * Math.PI / 180);
+    const dLon = dx / mPerDegLon;
+    const dLat = dx / mPerDegLat;
+    const features = [];
+    const step = Math.max(1, Math.floor(Math.sqrt((nx * ny) / 9000)));
+
+    for (let row = 0; row < ny; row += step) {
+      for (let col = 0; col < nx; col += step) {
+        const depth = h[row * nx + col];
+        if (!Number.isFinite(depth) || depth < 0.05) continue;
+        const lon = originLon + (col + 0.5) * dLon;
+        const lat = originLat + (row + 0.5) * dLat;
+        features.push({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [lon, lat] },
+          properties: {
+            depth_m: Math.round(depth * 1000) / 1000,
+            row,
+            col,
+            cell_m: Math.round(dx * 100) / 100
+          }
+        });
+      }
+    }
+
+    const fc = {
+      type: 'FeatureCollection',
+      properties: {
+        generatedAt: new Date().toISOString(),
+        nx,
+        ny,
+        dx,
+        sourceLayer: layer?.name || 'current-run'
+      },
+      features
+    };
+    const blob = new Blob([JSON.stringify(fc)], { type: 'application/geo+json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `hydrosim-${layer?.id || 'current'}-${Date.now()}.geojson`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    ui.setStatus(`Export erstellt (${features.length} Features)`, 'bi-download');
+  }
+
+  function clearActiveAnalysisLayer() {
+    if (!activeAnalysisLayerId) return;
+    waterRenderer?.removeStaticLayer(activeAnalysisLayerId);
+    analysisLayers.delete(activeAnalysisLayerId);
+    activeAnalysisLayerId = analysisLayers.keys().next().value || null;
+    refreshAnalysisUi();
   }
 
   function cameraHeightOk() {
@@ -270,6 +451,7 @@ import { createPanel } from './panel.js';
         }
       }
       ui.setImpact(impacts);
+      upsertAnalysisLayer(ui.getLayerStrategy());
       if (loadedTilesets === 0) {
         ui.setStatus('Fertig · keine LoD2-Gebäudelayer geladen (Impact = 0)', 'bi-info-circle');
       } else {
@@ -314,7 +496,7 @@ import { createPanel } from './panel.js';
           - (measures.dike ? 0.10 * level : 0)
       );
       const effectiveFlux = fluxM3ps * mf.inflow * measureReduction;
-      depthPerStep = Math.max(0, Math.min(0.0002, (effectiveFlux / sourceAreaM2) * dt));
+      depthPerStep = Math.max(0, Math.min(0.00015, (effectiveFlux / sourceAreaM2) * dt));
     }
 
     const frictionBoost =
@@ -322,13 +504,18 @@ import { createPanel } from './panel.js';
       + (measures.dike ? 0.55 * level : 0)
       + (measures.retention ? 0.35 * level : 0)
       + (measures.pump ? 0.15 * level : 0);
-    const cf = Math.max(0.02, 0.06 * mf.friction * frictionBoost);
+    const cf = Math.max(0.03, 0.08 * mf.friction * frictionBoost);
 
     for (let i = 0; i < stepsPerFrame; i++) {
-      if (src) {
-        wasmExports.injectSource(src.cx, src.cy, src.radius, depthPerStep);
+      const subSteps = Math.max(1, Math.ceil(dt / 0.1));
+      const dtSub = dt / subSteps;
+      const srcSub = depthPerStep / subSteps;
+      for (let s = 0; s < subSteps; s++) {
+        if (src) {
+          wasmExports.injectSource(src.cx, src.cy, src.radius, srcSub);
+        }
+        wasmExports.step(dtSub, 9.81, cf);
       }
-      wasmExports.step(dt, 9.81, cf);
       simT += dt;
       if (simT >= params.durationS) break;
     }
@@ -447,8 +634,21 @@ import { createPanel } from './panel.js';
     ui.setImpact([]);
   });
 
+  ui.onExport(() => {
+    exportActiveAsGeoJson();
+  });
+
+  ui.onLayerClear(() => {
+    clearActiveAnalysisLayer();
+  });
+
+  ui.onLayerActiveChange(() => {
+    activeAnalysisLayerId = ui.getActiveLayerId() || null;
+  });
+
   setState('idle');
   applyInteractionGate();
+  refreshAnalysisUi();
   const gateInterval = setInterval(applyInteractionGate, 800);
 
   window.HydroSim = {

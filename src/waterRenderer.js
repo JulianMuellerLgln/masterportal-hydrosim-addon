@@ -144,6 +144,7 @@ function buildWaterPrimitive(h, zb, nx, ny, dx, originLon, originLat) {
  */
 export function createWaterRenderer(scene) {
   let current = null; // current Cesium.Primitive
+  const staticLayers = new Map();
 
   function remove(p) {
     if (p && !p.isDestroyed()) {
@@ -183,10 +184,42 @@ export function createWaterRenderer(scene) {
       current = null;
     },
 
+    /** Add or replace a persisted analysis layer primitive by ID. */
+    upsertStaticLayer(id, h, zb, nx, ny, dx, originLon, originLat) {
+      const old = staticLayers.get(id);
+      remove(old);
+      const next = buildWaterPrimitive(h, zb, nx, ny, dx, originLon, originLat);
+      if (next) {
+        scene.primitives.add(next);
+        staticLayers.set(id, next);
+      } else {
+        staticLayers.delete(id);
+      }
+    },
+
+    /** Remove one persisted analysis layer by ID. */
+    removeStaticLayer(id) {
+      const p = staticLayers.get(id);
+      remove(p);
+      staticLayers.delete(id);
+    },
+
+    /** Remove all persisted analysis layers. */
+    clearStaticLayers() {
+      for (const p of staticLayers.values()) {
+        remove(p);
+      }
+      staticLayers.clear();
+    },
+
     /** Fully tear down. */
     destroy() {
       remove(current);
       current = null;
+      for (const p of staticLayers.values()) {
+        remove(p);
+      }
+      staticLayers.clear();
     }
   };
 }
