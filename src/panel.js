@@ -126,6 +126,12 @@ const PANEL_CSS = `
   color: #90a4ae;
   margin-top: 4px;
 }
+.hs-quality-note {
+  font-size: 0.72rem;
+  color: #ffcc80;
+  margin-top: 6px;
+  line-height: 1.3;
+}
 
 .hs-label {
   font-size: 0.78rem;
@@ -293,6 +299,18 @@ const PANEL_HTML = `
 
   <!-- Mode -->
   <div class="hs-section">
+    <div class="hs-section-title">Betriebsprofil</div>
+    <select id="hs-profile" class="hs-mode-select">
+      <option value="standard" selected>Standard</option>
+      <option value="advanced">Advanced</option>
+    </select>
+    <div class="hs-mode-help" id="hs-profile-help">
+      Standard für schnelle Szenarien. Advanced nutzt robuste Extrem-Defaults.
+    </div>
+  </div>
+
+  <!-- Mode -->
+  <div class="hs-section">
     <div class="hs-section-title">Modus</div>
     <select id="hs-mode" class="hs-mode-select">
       <option value="auto" selected>Automatik (empfohlen)</option>
@@ -302,6 +320,9 @@ const PANEL_HTML = `
     </select>
     <div class="hs-mode-help" id="hs-mode-help">
       Automatik wählt den Ereignistyp anhand von Volumen und Dauer.
+    </div>
+    <div class="hs-quality-note" id="hs-quality-note">
+      Qualitätsstufe: Vorschau (2D)
     </div>
   </div>
 
@@ -415,6 +436,9 @@ const PANEL_HTML = `
       <button id="hs-layer-clear" class="hs-analysis-btn" title="Aktive Analyse entfernen">
         <i class="bi bi-trash"></i>
       </button>
+      <button id="hs-layer-clear-all" class="hs-analysis-btn" title="Alle Analysen entfernen">
+        <i class="bi bi-trash3"></i>
+      </button>
     </div>
     <div class="hs-analysis-row">
       <button id="hs-export-geojson" class="hs-analysis-btn">
@@ -467,8 +491,11 @@ export function createPanel() {
   const volSlider   = $('hs-volume');
   const durSlider   = $('hs-duration');
   const speedSlider = $('hs-speed');
+  const profileSelect = $('hs-profile');
+  const profileHelp = $('hs-profile-help');
   const modeSelect  = $('hs-mode');
   const modeHelp    = $('hs-mode-help');
+  const qualityNote = $('hs-quality-note');
   const volVal      = $('hs-vol-val');
   const durVal      = $('hs-dur-val');
   const speedVal    = $('hs-speed-val');
@@ -484,6 +511,7 @@ export function createPanel() {
   const layerActive = $('hs-layer-active');
   const layerCount = $('hs-layer-count');
   const layerClear = $('hs-layer-clear');
+  const layerClearAll = $('hs-layer-clear-all');
   const exportGeoJson = $('hs-export-geojson');
   let panelState    = 'idle';
   let gateEnabled   = true;
@@ -494,6 +522,12 @@ export function createPanel() {
   });
   $('hs-close').addEventListener('click', () => {
     panel.classList.remove('visible');
+  });
+
+  profileSelect.addEventListener('change', () => {
+    profileHelp.textContent = profileSelect.value === 'advanced'
+      ? 'Advanced: stabilere Extremereignisse, strengere Solver-Grenzen, Analysefokus.'
+      : 'Standard für schnelle Szenarien. Advanced nutzt robuste Extrem-Defaults.';
   });
 
   modeSelect.addEventListener('change', () => {
@@ -529,6 +563,7 @@ export function createPanel() {
         durationMin: Number(durSlider.value),
         durationS:  Number(durSlider.value) * 60,
         speed:      Number(speedSlider.value),
+        profile:    profileSelect.value || 'standard',
         mode:       modeSelect.value || 'auto',
         measures: {
           pump: !!measurePump.checked,
@@ -546,6 +581,7 @@ export function createPanel() {
     onReset(fn) { resetBtn.addEventListener('click', fn); },
     onExport(fn) { exportGeoJson.addEventListener('click', fn); },
     onLayerClear(fn) { layerClear.addEventListener('click', fn); },
+    onLayerClearAll(fn) { layerClearAll.addEventListener('click', fn); },
     onLayerActiveChange(fn) { layerActive.addEventListener('change', fn); },
 
     getLayerStrategy() {
@@ -573,7 +609,15 @@ export function createPanel() {
       }
       layerCount.textContent = String(layers.length);
       layerClear.disabled = layers.length === 0;
-      exportGeoJson.disabled = layers.length === 0;
+      layerClearAll.disabled = layers.length === 0;
+    },
+
+    setQuality(quality, detail = '') {
+      const qualityText = quality === 'analysis-3d'
+        ? 'Qualitätsstufe: Analyse (3D)'
+        : 'Qualitätsstufe: Vorschau (2D)';
+      qualityNote.textContent = detail ? `${qualityText} · ${detail}` : qualityText;
+      qualityNote.style.color = quality === 'analysis-3d' ? '#a5d6a7' : '#ffcc80';
     },
 
     /** Update the panel to reflect current simulation state. */

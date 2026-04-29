@@ -10,10 +10,15 @@
     "build:wasm": "npx asc assembly/index.ts -o dist/hydrosim.wasm --runtime stub --initialMemory 4 --maximumMemory 256 -O3 --converge",
     "build:js": "vite build",
     "build": "npm run build:js && npm run build:wasm",
-    "dev": "vite build --watch"
+    "dev": "vite build --watch",
+    "test:backend": "vitest run tests/backend",
+    "test:ui": "playwright test",
+    "test": "npm run test:backend && npm run test:ui"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
     "assemblyscript": "^0.27.34",
-    "vite": "^5.4.0"
+    "vite": "^5.4.0",
+    "vitest": "^2.1.5"
   }
 }
