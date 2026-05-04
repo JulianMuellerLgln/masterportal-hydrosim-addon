@@ -4,7 +4,7 @@
  * Samples the DGM5 terrain mesh over a bounding-box grid covering the
  * user-drawn polygon, using Cesium.sampleTerrainMostDetailed().
  *
- * Returns { heights: Float32Array, nx, ny, dx, originLon, originLat }
+ * Returns { heights: Float32Array, nx, ny, dx, originLon, originLat, baseElevation }
  * where heights is in metres, row-major (y rows, x cols), and
  * values are relative (min height subtracted) so the WASM grid starts
  * with a sensible baseline.
@@ -76,7 +76,7 @@ function buildGrid(coords, resolutionM) {
  * @param {Array<{lon,lat}>} coords  WGS84 polygon vertices in degrees
  * @param {number} resolutionM       Desired grid cell size in metres (default 50)
  * @param {Function} onProgress      Optional progress callback (0..1)
- * @returns {Promise<{heights:Float32Array,nx,ny,dx,originLon,originLat}>}
+ * @returns {Promise<{heights:Float32Array,nx,ny,dx,originLon,originLat,baseElevation}>}
  */
 export async function sampleTerrainGrid(scene, coords, resolutionM = 50, onProgress) {
   const { grid, nx, ny, dx, minLon, minLat } = buildGrid(coords, resolutionM);
@@ -104,5 +104,14 @@ export async function sampleTerrainGrid(scene, coords, resolutionM = 50, onProgr
 
   console.log(`[HydroSim] Terrain sampled: ${nx}×${ny} grid, dx=${dx.toFixed(1)}m, min=${minH.toFixed(1)}m`);
 
-  return { heights, nx, ny, dx, originLon: minLon, originLat: minLat };
+  return {
+    heights,
+    nx,
+    ny,
+    dx,
+    originLon: minLon,
+    originLat: minLat,
+    // Rendering needs absolute world height, while solver runs on relative terrain.
+    baseElevation: minH
+  };
 }

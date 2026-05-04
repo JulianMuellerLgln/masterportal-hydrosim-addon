@@ -47,8 +47,8 @@ let ZB_OFF: i32 = 0;
 let SIM_T:     f32 = 0.0;  // elapsed simulation time in seconds
 let MAX_DEPTH: f32 = 0.0;  // peak depth seen this step (exposed to JS)
 const MAX_CELL_DEPTH: f32 = 30.0;
-const MAX_VEL: f32 = 12.0;
-const DRAINAGE_RATE: f32 = 0.000025;
+const MAX_VEL: f32 = 20.0;
+const DRAINAGE_RATE: f32 = 0.000004;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -249,7 +249,10 @@ export function step(dt: f32, g: f32, cf: f32): void {
         const presE: f32 = 0.5 * g * hE2 * hE2;
         dpu_dx = ((huE2 * uE + presE) - (huC * u + pres)) * invDx;
       }
-      let un: f32 = u - dt * (dpu_dx / (h + 1e-6) + g * dzbdx + cf * u * speed);
+      const slopeMag: f32 = Mathf.sqrt(dzbdx * dzbdx + dzbdy * dzbdy);
+      const frictionRelief: f32 = min<f32>(0.55, slopeMag * 2.5);
+      const cfLocal: f32 = cf * (1.0 - frictionRelief);
+      let un: f32 = u - dt * (dpu_dx / (h + 1e-6) + g * dzbdx + cfLocal * u * speed);
       if (!isFinite(un)) un = 0.0;
       if (un > MAX_VEL) un = MAX_VEL;
       if (un < -MAX_VEL) un = -MAX_VEL;
@@ -270,7 +273,7 @@ export function step(dt: f32, g: f32, cf: f32): void {
         const presN: f32 = 0.5 * g * hN2 * hN2;
         dpv_dy = ((hvN2 * vN + presN) - (hvC * v + pres)) * invDx;
       }
-      let vn: f32 = v - dt * (dpv_dy / (h + 1e-6) + g * dzbdy + cf * v * speed);
+      let vn: f32 = v - dt * (dpv_dy / (h + 1e-6) + g * dzbdy + cfLocal * v * speed);
       if (!isFinite(vn)) vn = 0.0;
       if (vn > MAX_VEL) vn = MAX_VEL;
       if (vn < -MAX_VEL) vn = -MAX_VEL;
@@ -300,6 +303,12 @@ export function hPtr(): i32 { return H_OFF; }
 
 /** Returns byte offset of zb[] grid (bed elevation). */
 export function zbPtr(): i32 { return ZB_OFF; }
+
+/** Returns byte offset of u[] velocity grid. */
+export function uPtr(): i32 { return U_OFF; }
+
+/** Returns byte offset of v[] velocity grid. */
+export function vPtr(): i32 { return V_OFF; }
 
 /** Returns a scratch buffer offset suitable for passing terrain data in.
  *  Size: at least nx*ny*4 bytes.  Reuses HN_OFF (safe before first step). */

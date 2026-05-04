@@ -2,41 +2,43 @@ export const RUNTIME_PROFILE = {
   standard: {
     maxInteractiveCameraHeightM: 8000,
     solver: {
+      renderEveryFrames: 2,
       maxDepthForDt: 4,
       minDepthForDt: 0.01,
-      cfl: 0.45,
-      dtCap: 0.5,
+      cfl: 0.55,
+      dtCap: 0.65,
       targetSubstepDt: 0.1,
-      maxSourceStepM: 0.00015,
+      maxSourceStepM: 0.00022,
       maxDisplayDepth: 20,
-      baseFriction: 0.08,
-      minFriction: 0.03,
+      baseFriction: 0.045,
+      minFriction: 0.015,
       frictionBoost: { dike: 0.55, retention: 0.35, pump: 0.15 }
     },
     modeFactors: {
       rain: { inflow: 1.0, friction: 1.0 },
-      flash: { inflow: 1.2, friction: 0.95 },
-      river: { inflow: 0.9, friction: 0.85 }
+      flash: { inflow: 1.35, friction: 0.8 },
+      river: { inflow: 1.0, friction: 0.75 }
     }
   },
   advanced: {
     maxInteractiveCameraHeightM: 8000,
     solver: {
+      renderEveryFrames: 2,
       maxDepthForDt: 3,
       minDepthForDt: 0.02,
-      cfl: 0.4,
-      dtCap: 0.35,
+      cfl: 0.5,
+      dtCap: 0.5,
       targetSubstepDt: 0.07,
-      maxSourceStepM: 0.00012,
+      maxSourceStepM: 0.0002,
       maxDisplayDepth: 15,
-      baseFriction: 0.09,
-      minFriction: 0.04,
+      baseFriction: 0.05,
+      minFriction: 0.02,
       frictionBoost: { dike: 0.6, retention: 0.4, pump: 0.18 }
     },
     modeFactors: {
       rain: { inflow: 1.0, friction: 1.0 },
-      flash: { inflow: 1.15, friction: 1.0 },
-      river: { inflow: 0.88, friction: 0.9 }
+      flash: { inflow: 1.3, friction: 0.82 },
+      river: { inflow: 0.98, friction: 0.78 }
     }
   }
 };
@@ -48,9 +50,9 @@ export function clamp01(v) {
 export function resolveEventMode(params) {
   if (params.mode && params.mode !== 'auto') return params.mode;
   const intensity = params.volumeM3 / Math.max(60, params.durationS);
-  if (intensity < 150) return 'rain';
-  if (intensity < 900) return 'flash';
-  return 'river';
+  if (intensity < 110) return 'rain';
+  if (params.durationS >= 3 * 3600 && intensity < 280) return 'river';
+  return 'flash';
 }
 
 export function getRuntimeProfile(params) {

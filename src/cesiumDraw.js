@@ -238,3 +238,113 @@ export function startPolygonDraw(scene, onComplete) {
 
   return handler;
 }
+
+function pickCartesian(scene, screenPos) {
+  let pos = scene.pickPosition(screenPos);
+  if (!pos || !Cesium.defined(pos)) {
+    const ray = scene.camera.getPickRay(screenPos);
+    pos = scene.globe.pick(ray, scene);
+  }
+  return pos;
+}
+
+function toCoord(position) {
+  const carto = Cesium.Cartographic.fromCartesian(position);
+  return {
+    lon: Cesium.Math.toDegrees(carto.longitude),
+    lat: Cesium.Math.toDegrees(carto.latitude)
+  };
+}
+
+export function startPointDraw(scene, onComplete) {
+  const canvas = scene.canvas;
+  const handler = new Cesium.ScreenSpaceEventHandler(canvas);
+  canvas.style.cursor = 'crosshair';
+
+  function cleanup() {
+    canvas.style.cursor = '';
+    handler.destroy();
+  }
+
+  handler.setInputAction((click) => {
+    const pos = pickCartesian(scene, click.position);
+    if (!pos) return;
+    const coord = toCoord(pos);
+    cleanup();
+    onComplete(coord);
+  }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+  handler.setInputAction(() => {
+    cleanup();
+  }, Cesium.ScreenSpaceEventType.RIGHT_CLICK);
+
+  return handler;
+}
+
+export function startPolylineDraw(scene, onComplete) {
+  const positions = [];
+  const canvas = scene.canvas;
+  const preview = createPreviewEntities({ scene });
+  const handler = new Cesium.ScreenSpaceEventHandler(canvas);
+  canvas.style.cursor = 'crosshair';
+
+  function cleanup() {
+    try { preview.destroy(); } catch (_) {}
+    canvas.style.cursor = '';
+    handler.destroy();
+  }
+
+  function updateLinePreview() {
+    preview.points.removeAll();
+    preview.polys.removeAll();
+    for (const pos of positions) {
+      preview.addPoint(pos);
+    }
+    if (positions.length >= 2) {
+      preview.polys.add({
+        positions,
+        width: 3,
+        material: Cesium.Material.fromType('Color', {
+          color: Cesium.Color.fromCssColorString('#ffb300')
+        }),
+        loop: false
+      });
+    }
+  }
+
+  handler.setInputAction((click) => {
+    const pos = pickCartesian(scene, click.position);
+    if (!pos) return;
+    positions.push(pos);
+    updateLinePreview();
+  }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+  handler.setInputAction((click) => {
+    const pos = pickCartesian(scene, click.position);
+    if (pos && positions.length > 0) {
+      const d = Cesium.Cartesian3.distance(pos, positions[positions.length - 1]);
+      if (d > 0.5) {
+        positions.push(pos);
+      }
+    }
+    if (positions.length >= 2) {
+      const coords = positions.map(toCoord);
+      cleanup();
+      onComplete(coords);
+      return;
+    }
+    cleanup();
+  }, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
+
+  handler.setInputAction(() => {
+    if (positions.length >= 2) {
+      const coords = positions.map(toCoord);
+      cleanup();
+      onComplete(coords);
+      return;
+    }
+    cleanup();
+  }, Cesium.ScreenSpaceEventType.RIGHT_CLICK);
+
+  return handler;
+}

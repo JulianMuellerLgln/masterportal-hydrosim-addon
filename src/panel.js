@@ -257,6 +257,26 @@ input[type=range].hs-range {
   opacity: 0.5;
   cursor: not-allowed;
 }
+.hs-layer-hint {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #1e2a30;
+  border: 1px solid #32434a;
+  font-size: 0.71rem;
+  color: #b0bec5;
+  line-height: 1.35;
+}
+.hs-layer-hint.rescue {
+  background: #2f2420;
+  border-color: #7d4f2c;
+  color: #ffd8b0;
+}
+.hs-layer-hint.water {
+  background: #1e2a30;
+  border-color: #35515d;
+  color: #c5e3f3;
+}
 .hs-measure-row {
   display: flex;
   align-items: center;
@@ -272,6 +292,35 @@ input[type=range].hs-range {
   font-size: 0.70rem;
   color: #90a4ae;
   margin-top: 4px;
+}
+.hs-measure-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  margin-top: 6px;
+}
+.hs-measure-btn {
+  background: #263238;
+  color: #fff;
+  border: 1px solid #6d2b36;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+.hs-measure-btn:hover:not(:disabled) {
+  background: #3a1d24;
+}
+.hs-measure-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.hs-measure-count {
+  align-self: center;
+  font-size: 0.72rem;
+  color: #90a4ae;
+  min-width: 54px;
+  text-align: right;
 }
 `;
 
@@ -400,14 +449,32 @@ const PANEL_HTML = `
       <span><i class="bi bi-droplet-half"></i> Pumpen aktiv</span>
       <input id="hs-measure-pump" type="checkbox">
     </label>
+    <div class="hs-measure-actions">
+      <button id="hs-measure-pump-place" class="hs-measure-btn">
+        <i class="bi bi-crosshair"></i> Pumpen platzieren
+      </button>
+      <span id="hs-measure-pump-count" class="hs-measure-count">0 gesetzt</span>
+    </div>
     <label class="hs-measure-row">
       <span><i class="bi bi-bricks"></i> Mobile Deiche</span>
       <input id="hs-measure-dike" type="checkbox">
     </label>
+    <div class="hs-measure-actions">
+      <button id="hs-measure-dike-place" class="hs-measure-btn">
+        <i class="bi bi-bezier2"></i> Deichlinie zeichnen
+      </button>
+      <span id="hs-measure-dike-count" class="hs-measure-count">0 gesetzt</span>
+    </div>
     <label class="hs-measure-row">
       <span><i class="bi bi-tree"></i> Retentionsflächen</span>
       <input id="hs-measure-retention" type="checkbox">
     </label>
+    <div class="hs-measure-actions">
+      <button id="hs-measure-ret-place" class="hs-measure-btn">
+        <i class="bi bi-bounding-box"></i> Fläche zeichnen
+      </button>
+      <span id="hs-measure-ret-count" class="hs-measure-count">0 gesetzt</span>
+    </div>
     <div class="hs-label" style="margin-top:6px">
       Maßnahmen-Intensität
       <span><span id="hs-measure-level-val">40</span>%</span>
@@ -415,7 +482,12 @@ const PANEL_HTML = `
     <input type="range" class="hs-range" id="hs-measure-level"
            min="0" max="100" step="5" value="40">
     <div class="hs-measure-help">
-      Wirkt auf Zuflussreduktion und Fließwiderstand in der Simulation.
+      Wirkt auf die Stärke platzierter Maßnahmen. Aktivierte, aber nicht platzierte Maßnahmen werden ignoriert.
+    </div>
+    <div class="hs-analysis-row" style="margin-top:8px">
+      <button id="hs-measure-clear-all" class="hs-analysis-btn">
+        <i class="bi bi-trash"></i> Maßnahmen zurücksetzen
+      </button>
     </div>
   </div>
 
@@ -439,6 +511,9 @@ const PANEL_HTML = `
       <button id="hs-layer-clear-all" class="hs-analysis-btn" title="Alle Analysen entfernen">
         <i class="bi bi-trash3"></i>
       </button>
+    </div>
+    <div id="hs-layer-hint" class="hs-layer-hint">
+      Aktive Layer-Legende: Wasser zeigt Tiefe in Blau. Rettungs-Heatmap zeigt Priorität in warmen Farben.
     </div>
     <div class="hs-analysis-row">
       <button id="hs-export-geojson" class="hs-analysis-btn">
@@ -504,6 +579,13 @@ export function createPanel() {
   const measureRet  = $('hs-measure-retention');
   const measureLvl  = $('hs-measure-level');
   const measureLvlVal = $('hs-measure-level-val');
+  const measurePumpPlace = $('hs-measure-pump-place');
+  const measureDikePlace = $('hs-measure-dike-place');
+  const measureRetPlace = $('hs-measure-ret-place');
+  const measureClearAll = $('hs-measure-clear-all');
+  const measurePumpCount = $('hs-measure-pump-count');
+  const measureDikeCount = $('hs-measure-dike-count');
+  const measureRetCount = $('hs-measure-ret-count');
   const impactSec   = $('hs-impact-section');
   const impactCount = $('hs-impact-count');
   const impactTbody = $('hs-impact-tbody');
@@ -512,6 +594,7 @@ export function createPanel() {
   const layerCount = $('hs-layer-count');
   const layerClear = $('hs-layer-clear');
   const layerClearAll = $('hs-layer-clear-all');
+  const layerHint = $('hs-layer-hint');
   const exportGeoJson = $('hs-export-geojson');
   let panelState    = 'idle';
   let gateEnabled   = true;
@@ -534,6 +617,30 @@ export function createPanel() {
     modeHelp.textContent = modeSelect.value === 'auto'
       ? 'Automatik wählt den Ereignistyp anhand von Volumen und Dauer.'
       : `Manueller Modus: ${modeSelect.options[modeSelect.selectedIndex].text}`;
+  });
+
+  function updateLayerHint() {
+    const selected = layerActive.options[layerActive.selectedIndex];
+    const label = selected?.textContent || '';
+    const isRescue = label.includes('Rettungs-Heatmap');
+    const isWater = label.includes('Wasser');
+
+    layerHint.classList.remove('rescue', 'water');
+    if (isRescue) {
+      layerHint.classList.add('rescue');
+      layerHint.textContent = 'Aktive Layer-Legende: Rettungs-Heatmap. Warme Farben markieren hohe Rettungspriorität.';
+      return;
+    }
+    if (isWater) {
+      layerHint.classList.add('water');
+      layerHint.textContent = 'Aktive Layer-Legende: Wasser. Blautöne zeigen Wassertiefe und Dynamik.';
+      return;
+    }
+    layerHint.textContent = 'Aktive Layer-Legende: Keine Analyse ausgewählt.';
+  }
+
+  layerActive.addEventListener('change', () => {
+    updateLayerHint();
   });
 
   // Sliders
@@ -583,6 +690,10 @@ export function createPanel() {
     onLayerClear(fn) { layerClear.addEventListener('click', fn); },
     onLayerClearAll(fn) { layerClearAll.addEventListener('click', fn); },
     onLayerActiveChange(fn) { layerActive.addEventListener('change', fn); },
+    onPlacePump(fn) { measurePumpPlace.addEventListener('click', fn); },
+    onPlaceDike(fn) { measureDikePlace.addEventListener('click', fn); },
+    onPlaceRetention(fn) { measureRetPlace.addEventListener('click', fn); },
+    onMeasureClearAll(fn) { measureClearAll.addEventListener('click', fn); },
 
     getLayerStrategy() {
       return layerStrategy.value || 'append';
@@ -610,6 +721,7 @@ export function createPanel() {
       layerCount.textContent = String(layers.length);
       layerClear.disabled = layers.length === 0;
       layerClearAll.disabled = layers.length === 0;
+      updateLayerHint();
     },
 
     setQuality(quality, detail = '') {
@@ -628,6 +740,11 @@ export function createPanel() {
       runBtn.disabled   = !gateEnabled || !['ready', 'paused'].includes(state);
       pauseBtn.disabled = state !== 'running';
       resetBtn.disabled = state === 'sampling';
+      const measureActionDisabled = !gateEnabled || ['sampling', 'running'].includes(state);
+      measurePumpPlace.disabled = measureActionDisabled;
+      measureDikePlace.disabled = measureActionDisabled;
+      measureRetPlace.disabled = measureActionDisabled;
+      measureClearAll.disabled = measureActionDisabled;
 
       if (state === 'drawing') {
         drawLabel.textContent = 'Zeichnen…';
@@ -688,6 +805,15 @@ export function createPanel() {
           <td style="font-size:0.65rem">${r.lon}°<br>${r.lat}°</td>
         </tr>`;
       }).join('');
+    },
+
+    setMeasureCounts(counts = {}) {
+      const pumpCount = Number.isFinite(counts.pump) ? counts.pump : 0;
+      const dikeCount = Number.isFinite(counts.dike) ? counts.dike : 0;
+      const retentionCount = Number.isFinite(counts.retention) ? counts.retention : 0;
+      measurePumpCount.textContent = `${pumpCount} gesetzt`;
+      measureDikeCount.textContent = `${dikeCount} gesetzt`;
+      measureRetCount.textContent = `${retentionCount} gesetzt`;
     }
   };
 }

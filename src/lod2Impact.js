@@ -23,7 +23,17 @@ function cartesianToLonLat(cartesian) {
   const carto = Cesium.Cartographic.fromCartesian(cartesian);
   return {
     lon: Cesium.Math.toDegrees(carto.longitude),
-    lat: Cesium.Math.toDegrees(carto.latitude)
+    lat: Cesium.Math.toDegrees(carto.latitude),
+    height: Number.isFinite(carto.height) ? carto.height : 0
+  };
+}
+
+function offsetLonLat(lon, lat, eastM, northM) {
+  const mPerDegLat = 111000;
+  const mPerDegLon = 111000 * Math.cos(lat * Math.PI / 180);
+  return {
+    lon: lon + eastM / Math.max(1e-6, mPerDegLon),
+    lat: lat + northM / mPerDegLat
   };
 }
 
@@ -60,6 +70,31 @@ function estimateFloors(radius) {
   return Math.max(1, Math.round(radius / 4));
 }
 
+const tilesetCandidateCache = new WeakMap();
+
+function getTilesetCandidates(scene) {
+  if (!scene?.primitives) return [];
+  const primitiveCount = scene.primitives.length;
+  const cached = tilesetCandidateCache.get(scene);
+  if (cached && cached.primitiveCount === primitiveCount) {
+    return cached.items;
+  }
+
+  const items = [];
+  for (let i = 0; i < primitiveCount; i++) {
+    const prim = scene.primitives.get(i);
+    if (!prim || prim.imageBasedLighting === undefined) continue;
+    if (!prim.boundingSphere) continue;
+    items.push({ index: i, prim });
+  }
+
+  tilesetCandidateCache.set(scene, {
+    primitiveCount,
+    items
+  });
+  return items;
+}
+
 /**
  * Compute building impact for all loaded LoD2 tilesets in the scene.
  *
@@ -76,35 +111,69 @@ export function computeImpact(scene, h, nx, ny, dx, originLon, originLat) {
   const results = [];
   let idCounter = 0;
 
-  for (let i = 0; i < scene.primitives.length; i++) {
-    const prim = scene.primitives.get(i);
-    // Cesium3DTileset check: has imageBasedLighting, not a Primitive we added
-    if (!prim || prim.imageBasedLighting === undefined) continue;
-    // Skip our own water primitive (it has no boundingSphere at primitive level)
-    if (!prim.boundingSphere) continue;
+  const candidates = getTilesetCandidates(scene);
+  for (const candidate of candidates) {
+    const i = candidate.index;
+    const prim = candidate.prim;
 
     const center = prim.boundingSphere?.center;
     if (!center) continue;
 
-    const { lon, lat } = cartesianToLonLat(center);
-    const depth = sampleDepth(lon, lat, h, nx, ny, dx, originLon, originLat);
-
-    if (depth < 0.05) continue; // not in flood zone
+    const { lon, lat, height } = cartesianToLonLat(center);
 
     const radius = prim.boundingSphere.radius || 10;
+    const footprintRadius = Math.max(4, Math.min(40, radius * 0.3));
+    const offsets = [
+      [0, 0],
+      [footprintRadius * 0.4, 0],
+      [-footprintRadius * 0.4, 0],
+      [0, footprintRadius * 0.4],
+      [0, -footprintRadius * 0.4],
+      [footprintRadius * 0.8, 0],
+      [-footprintRadius * 0.8, 0],
+      [0, footprintRadius * 0.8],
+      [0, -footprintRadius * 0.8],
+      [footprintRadius * 0.55, footprintRadius * 0.55],
+      [footprintRadius * 0.55, -footprintRadius * 0.55],
+      [-footprintRadius * 0.55, footprintRadius * 0.55],
+      [-footprintRadius * 0.55, -footprintRadius * 0.55]
+    ];
+
+    let wetSamples = 0;
+    let maxDepth = 0;
+    let depthSum = 0;
+    for (const [eastM, northM] of offsets) {
+      const p = offsetLonLat(lon, lat, eastM, northM);
+      const d = sampleDepth(p.lon, p.lat, h, nx, ny, dx, originLon, originLat);
+      if (d >= 0.003) {
+        wetSamples += 1;
+      }
+      if (d > maxDepth) {
+        maxDepth = d;
+      }
+      depthSum += d;
+    }
+    if (wetSamples === 0 || maxDepth < 0.003) continue;
+
+    const meanDepth = depthSum / offsets.length;
+    const wetFraction = wetSamples / offsets.length;
     const floors = estimateFloors(radius);
 
     // Footprint factor: larger tilesets = more buildings
     const footprintFactor = Math.min(5.0, radius / 20);
-    const score = depth * floors * footprintFactor;
+    const score = (0.65 * maxDepth + 0.35 * meanDepth) * floors * footprintFactor * (0.7 + wetFraction * 0.6);
 
     results.push({
       id:     `tileset-${i}-${idCounter++}`,
       lon:    lon.toFixed(5),
       lat:    lat.toFixed(5),
-      depth:  Math.round(depth * 100) / 100,
+      depth:  Math.round(maxDepth * 100) / 100,
+      meanDepth: Math.round(meanDepth * 100) / 100,
+      wetFraction: Math.round(wetFraction * 100) / 100,
       floors,
       score:  Math.round(score * 10) / 10,
+      footprintRadiusM: Math.round(footprintRadius),
+      centerHeightM: Math.round(height),
       label:  `Gebäude ~(${lon.toFixed(3)}°, ${lat.toFixed(3)}°)`
     });
   }
@@ -116,15 +185,7 @@ export function computeImpact(scene, h, nx, ny, dx, originLon, originLat) {
 
 /** Count currently loaded Cesium3DTileset-like primitives in scene. */
 export function countLoadedTilesets(scene) {
-  if (!scene?.primitives) return 0;
-  let count = 0;
-  for (let i = 0; i < scene.primitives.length; i++) {
-    const prim = scene.primitives.get(i);
-    if (!prim || prim.imageBasedLighting === undefined) continue;
-    if (!prim.boundingSphere) continue;
-    count += 1;
-  }
-  return count;
+  return getTilesetCandidates(scene).length;
 }
 
 /**

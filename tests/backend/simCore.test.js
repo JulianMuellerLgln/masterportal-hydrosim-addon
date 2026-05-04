@@ -12,7 +12,8 @@ describe('simCore', () => {
   it('resolves automatic event mode by intensity', () => {
     expect(resolveEventMode({ mode: 'auto', volumeM3: 6000, durationS: 3600 })).toBe('rain');
     expect(resolveEventMode({ mode: 'auto', volumeM3: 200000, durationS: 600 })).toBe('flash');
-    expect(resolveEventMode({ mode: 'auto', volumeM3: 2000000, durationS: 600 })).toBe('river');
+    expect(resolveEventMode({ mode: 'auto', volumeM3: 2000000, durationS: 600 })).toBe('flash');
+    expect(resolveEventMode({ mode: 'auto', volumeM3: 2000000, durationS: 4 * 3600 })).toBe('river');
   });
 
   it('respects manual event mode', () => {
@@ -26,8 +27,8 @@ describe('simCore', () => {
   });
 
   it('returns runtime profiles for standard and advanced', () => {
-    expect(getRuntimeProfile({ profile: 'standard' }).solver.dtCap).toBe(0.5);
-    expect(getRuntimeProfile({ profile: 'advanced' }).solver.dtCap).toBe(0.35);
+    expect(getRuntimeProfile({ profile: 'standard' }).solver.dtCap).toBe(0.65);
+    expect(getRuntimeProfile({ profile: 'advanced' }).solver.dtCap).toBe(0.5);
   });
 
   it('validates terrain compatibility', () => {
